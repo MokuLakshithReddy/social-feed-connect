@@ -1,0 +1,114 @@
+import { useState, useRef } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
+import AppLayout from "@/components/AppLayout";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { ImagePlus, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { motion } from "framer-motion";
+
+const CreatePost = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [caption, setCaption] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
+  };
+
+  const handleSubmit = async () => {
+    if (!user || !file) return;
+    setLoading(true);
+    try {
+      const ext = file.name.split(".").pop();
+      const path = `${user.id}/${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("posts").upload(path, file);
+      if (uploadError) throw uploadError;
+
+      const { error: insertError } = await supabase.from("posts").insert({
+        user_id: user.id,
+        image_url: path,
+        caption,
+      });
+      if (insertError) throw insertError;
+
+      toast.success("Post shared!");
+      navigate("/");
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <AppLayout>
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b bg-background/95 backdrop-blur px-4 py-3">
+        <button onClick={() => navigate(-1)} className="text-sm font-medium">
+          Cancel
+        </button>
+        <h1 className="text-base font-semibold">New Post</h1>
+        <Button
+          size="sm"
+          onClick={handleSubmit}
+          disabled={!file || loading}
+          className="rounded-lg"
+        >
+          {loading ? "..." : "Share"}
+        </Button>
+      </header>
+
+      <div className="p-4">
+        {!preview ? (
+          <motion.button
+            whileTap={{ scale: 0.98 }}
+            onClick={() => fileRef.current?.click()}
+            className="flex aspect-square w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-border bg-secondary/50 transition-colors hover:bg-secondary"
+          >
+            <ImagePlus className="h-12 w-12 text-muted-foreground" />
+            <p className="mt-3 text-sm font-medium text-muted-foreground">Tap to select a photo</p>
+          </motion.button>
+        ) : (
+          <div className="relative">
+            <img src={preview} alt="Preview" className="w-full rounded-2xl object-cover" />
+            <button
+              onClick={() => {
+                setFile(null);
+                setPreview(null);
+              }}
+              className="absolute right-3 top-3 rounded-full bg-foreground/70 p-1.5 text-background"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        <Textarea
+          placeholder="Write a caption..."
+          value={caption}
+          onChange={(e) => setCaption(e.target.value)}
+          className="mt-4 min-h-[100px] resize-none rounded-xl border-0 bg-secondary"
+        />
+      </div>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFile}
+        className="hidden"
+      />
+    </AppLayout>
+  );
+};
+
+export default CreatePost;
