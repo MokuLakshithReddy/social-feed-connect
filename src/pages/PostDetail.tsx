@@ -19,12 +19,20 @@ const PostDetail = () => {
       .select("*, profiles(username, avatar_url), likes(user_id), comments(id)")
       .eq("id", postId)
       .maybeSingle();
+    if (!data) {
+      navigate("/", { replace: true });
+      return;
+    }
     setPost(data);
   };
 
   useEffect(() => {
     fetchPost();
   }, [postId]);
+
+  const handlePostDeleted = () => {
+    navigate("/", { replace: true });
+  };
 
   return (
     <AppLayout>

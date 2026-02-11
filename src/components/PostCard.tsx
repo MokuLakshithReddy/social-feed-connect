@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Heart, MessageCircle, MoreHorizontal } from "lucide-react";
+import { Heart, MessageCircle, Send } from "lucide-react";
+import PostActions from "@/components/PostActions";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { getAvatarUrl, getPostImageUrl } from "@/lib/supabase-helpers";
@@ -72,7 +73,7 @@ const PostCard = ({ post, onLikeToggle, onCommentOpen }: PostCardProps) => {
           </div>
           <span className="text-sm font-semibold">{post.profiles?.username}</span>
         </button>
-        <MoreHorizontal className="ml-auto h-5 w-5 text-muted-foreground" />
+        <PostActions postId={post.id} postUserId={post.user_id} onDeleted={onLikeToggle} />
       </div>
 
       {/* Image */}
@@ -110,6 +111,15 @@ const PostCard = ({ post, onLikeToggle, onCommentOpen }: PostCardProps) => {
           </button>
           <button onClick={() => onCommentOpen?.(post.id)}>
             <MessageCircle className="h-6 w-6" />
+          </button>
+          <button onClick={() => {
+            if (navigator.share) {
+              navigator.share({ title: "Snapgram", url: `${window.location.origin}/post/${post.id}` }).catch(() => {});
+            } else {
+              navigator.clipboard.writeText(`${window.location.origin}/post/${post.id}`);
+            }
+          }}>
+            <Send className="h-6 w-6" />
           </button>
         </div>
         <p className="mt-2 text-sm font-semibold">{likeCount.toLocaleString()} likes</p>
