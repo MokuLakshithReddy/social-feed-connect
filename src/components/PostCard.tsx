@@ -73,7 +73,7 @@ const PostCard = ({ post, onLikeToggle, onCommentOpen }: PostCardProps) => {
           </div>
           <span className="text-sm font-semibold">{post.profiles?.username}</span>
         </button>
-        <MoreHorizontal className="ml-auto h-5 w-5 text-muted-foreground" />
+        <PostActions postId={post.id} postUserId={post.user_id} onDeleted={onLikeToggle} />
       </div>
 
       {/* Image */}
