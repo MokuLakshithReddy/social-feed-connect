@@ -1,13 +1,13 @@
 import { useEffect, useState, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import AppLayout from "@/components/AppLayout";
 import { getAvatarUrl, getPostImageUrl } from "@/lib/supabase-helpers";
 import { Button } from "@/components/ui/button";
-import { Settings, Grid3X3, LogOut } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Grid3X3, LogOut, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
+import FollowersDialog from "@/components/FollowersDialog";
 
 const Profile = () => {
   const { userId } = useParams();
@@ -20,19 +20,18 @@ const Profile = () => {
   const [followingCount, setFollowingCount] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [followDialog, setFollowDialog] = useState<"followers" | "following" | null>(null);
 
   const isOwn = user?.id === userId;
 
   const fetchProfile = async () => {
     if (!userId) return;
-
     const [profileRes, postsRes, followersRes, followingRes] = await Promise.all([
       supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
       supabase.from("posts").select("id, image_url").eq("user_id", userId).order("created_at", { ascending: false }),
       supabase.from("followers").select("id", { count: "exact" }).eq("following_id", userId),
       supabase.from("followers").select("id", { count: "exact" }).eq("follower_id", userId),
     ]);
-
     setProfile(profileRes.data);
     setPosts(postsRes.data ?? []);
     setFollowersCount(followersRes.count ?? 0);
@@ -40,11 +39,8 @@ const Profile = () => {
 
     if (user && user.id !== userId) {
       const { data } = await supabase
-        .from("followers")
-        .select("id")
-        .eq("follower_id", user.id)
-        .eq("following_id", userId)
-        .maybeSingle();
+        .from("followers").select("id")
+        .eq("follower_id", user.id).eq("following_id", userId).maybeSingle();
       setIsFollowing(!!data);
     }
     setLoading(false);
@@ -83,6 +79,28 @@ const Profile = () => {
     navigate("/auth");
   };
 
+  const handleMessage = async () => {
+    if (!user || !userId) return;
+    // Check for existing conversation
+    const { data: existing } = await supabase
+      .from("conversations")
+      .select("id")
+      .or(`and(user1_id.eq.${user.id},user2_id.eq.${userId}),and(user1_id.eq.${userId},user2_id.eq.${user.id})`)
+      .maybeSingle();
+
+    if (existing) {
+      navigate(`/chat/${existing.id}`);
+    } else {
+      const { data: newConvo, error } = await supabase
+        .from("conversations")
+        .insert({ user1_id: user.id, user2_id: userId })
+        .select("id")
+        .single();
+      if (error) { toast.error("Could not start conversation"); return; }
+      navigate(`/chat/${newConvo.id}`);
+    }
+  };
+
   if (loading) {
     return (
       <AppLayout>
@@ -96,9 +114,7 @@ const Profile = () => {
   if (!profile) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center py-20 text-muted-foreground">
-          User not found
-        </div>
+        <div className="flex items-center justify-center py-20 text-muted-foreground">User not found</div>
       </AppLayout>
     );
   }
@@ -117,7 +133,6 @@ const Profile = () => {
       </header>
 
       <div className="px-4 py-5">
-        {/* Profile Info */}
         <div className="flex items-center gap-6">
           <button
             onClick={() => isOwn && fileRef.current?.click()}
@@ -132,62 +147,44 @@ const Profile = () => {
             )}
           </button>
           <div className="flex flex-1 justify-around text-center">
-            <div>
-              <p className="text-lg font-bold">{posts.length}</p>
-              <p className="text-xs text-muted-foreground">Posts</p>
-            </div>
-            <div>
-              <p className="text-lg font-bold">{followersCount}</p>
-              <p className="text-xs text-muted-foreground">Followers</p>
-            </div>
-            <div>
-              <p className="text-lg font-bold">{followingCount}</p>
-              <p className="text-xs text-muted-foreground">Following</p>
-            </div>
+            <div><p className="text-lg font-bold">{posts.length}</p><p className="text-xs text-muted-foreground">Posts</p></div>
+            <button onClick={() => setFollowDialog("followers")}>
+              <p className="text-lg font-bold">{followersCount}</p><p className="text-xs text-muted-foreground">Followers</p>
+            </button>
+            <button onClick={() => setFollowDialog("following")}>
+              <p className="text-lg font-bold">{followingCount}</p><p className="text-xs text-muted-foreground">Following</p>
+            </button>
           </div>
         </div>
 
         {profile.bio && <p className="mt-3 text-sm">{profile.bio}</p>}
 
         {!isOwn && user && (
-          <Button
-            onClick={toggleFollow}
-            variant={isFollowing ? "secondary" : "default"}
-            className="mt-4 w-full rounded-xl"
-          >
-            {isFollowing ? "Following" : "Follow"}
-          </Button>
+          <div className="mt-4 flex gap-2">
+            <Button onClick={toggleFollow} variant={isFollowing ? "secondary" : "default"} className="flex-1 rounded-xl">
+              {isFollowing ? "Following" : "Follow"}
+            </Button>
+            <Button onClick={handleMessage} variant="secondary" className="rounded-xl" size="icon">
+              <MessageCircle className="h-5 w-5" />
+            </Button>
+          </div>
         )}
 
         {isOwn && (
-          <Button
-            variant="secondary"
-            className="mt-4 w-full rounded-xl"
-            onClick={() => navigate("/edit-profile")}
-          >
+          <Button variant="secondary" className="mt-4 w-full rounded-xl" onClick={() => navigate("/edit-profile")}>
             Edit Profile
           </Button>
         )}
       </div>
 
-      {/* Posts Grid */}
       <div className="border-t">
         <div className="flex items-center justify-center py-2">
           <Grid3X3 className="h-5 w-5 text-foreground" />
         </div>
         <div className="grid grid-cols-3 gap-0.5">
           {posts.map((post) => (
-            <button
-              key={post.id}
-              onClick={() => navigate(`/post/${post.id}`)}
-              className="aspect-square overflow-hidden bg-secondary"
-            >
-              <img
-                src={getPostImageUrl(post.image_url)}
-                alt=""
-                className="h-full w-full object-cover"
-                loading="lazy"
-              />
+            <button key={post.id} onClick={() => navigate(`/post/${post.id}`)} className="aspect-square overflow-hidden bg-secondary">
+              <img src={getPostImageUrl(post.image_url)} alt="" className="h-full w-full object-cover" loading="lazy" />
             </button>
           ))}
         </div>
@@ -197,6 +194,15 @@ const Profile = () => {
       </div>
 
       <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+
+      {followDialog && userId && (
+        <FollowersDialog
+          userId={userId}
+          type={followDialog}
+          open={!!followDialog}
+          onOpenChange={(open) => !open && setFollowDialog(null)}
+        />
+      )}
     </AppLayout>
   );
 };

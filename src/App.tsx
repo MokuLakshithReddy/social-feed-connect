@@ -12,6 +12,8 @@ import Profile from "./pages/Profile";
 import EditProfile from "./pages/EditProfile";
 import PostDetail from "./pages/PostDetail";
 import Notifications from "./pages/Notifications";
+import Chats from "./pages/Chats";
+import ChatConversation from "./pages/ChatConversation";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,6 +52,8 @@ const App = () => (
             <Route path="/edit-profile" element={<ProtectedRoute><EditProfile /></ProtectedRoute>} />
             <Route path="/post/:postId" element={<ProtectedRoute><PostDetail /></ProtectedRoute>} />
             <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+            <Route path="/chats" element={<ProtectedRoute><Chats /></ProtectedRoute>} />
+            <Route path="/chat/:conversationId" element={<ProtectedRoute><ChatConversation /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>

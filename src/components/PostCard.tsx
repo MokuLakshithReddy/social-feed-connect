@@ -112,6 +112,15 @@ const PostCard = ({ post, onLikeToggle, onCommentOpen }: PostCardProps) => {
           <button onClick={() => onCommentOpen?.(post.id)}>
             <MessageCircle className="h-6 w-6" />
           </button>
+          <button onClick={() => {
+            if (navigator.share) {
+              navigator.share({ title: "Snapgram", url: `${window.location.origin}/post/${post.id}` }).catch(() => {});
+            } else {
+              navigator.clipboard.writeText(`${window.location.origin}/post/${post.id}`);
+            }
+          }}>
+            <Send className="h-6 w-6" />
+          </button>
         </div>
         <p className="mt-2 text-sm font-semibold">{likeCount.toLocaleString()} likes</p>
         {post.caption && (

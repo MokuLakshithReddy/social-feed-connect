@@ -12,7 +12,7 @@ const BottomNav = () => {
     { icon: Home, path: "/", label: "Home" },
     { icon: Search, path: "/explore", label: "Explore" },
     { icon: PlusSquare, path: "/create", label: "Create" },
-    { icon: Heart, path: "/notifications", label: "Notifications" },
+    { icon: MessageCircle, path: "/chats", label: "Chats" },
     { icon: User, path: `/profile/${user?.id}`, label: "Profile" },
   ];
 
