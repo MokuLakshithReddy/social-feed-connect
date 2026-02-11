@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Heart, MessageCircle, MoreHorizontal } from "lucide-react";
+import { Heart, MessageCircle, Send } from "lucide-react";
+import PostActions from "@/components/PostActions";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { getAvatarUrl, getPostImageUrl } from "@/lib/supabase-helpers";
