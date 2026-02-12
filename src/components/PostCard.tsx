@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Heart, MessageCircle, Send } from "lucide-react";
 import PostActions from "@/components/PostActions";
+import SharePostDialog from "@/components/SharePostDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { getAvatarUrl, getPostImageUrl } from "@/lib/supabase-helpers";
@@ -31,6 +32,7 @@ const PostCard = ({ post, onLikeToggle, onCommentOpen }: PostCardProps) => {
   const [liked, setLiked] = useState(isLiked);
   const [likeCount, setLikeCount] = useState(post.likes?.length ?? 0);
   const [showHeart, setShowHeart] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const toggleLike = async () => {
     if (!user) return;
@@ -112,13 +114,7 @@ const PostCard = ({ post, onLikeToggle, onCommentOpen }: PostCardProps) => {
           <button onClick={() => onCommentOpen?.(post.id)}>
             <MessageCircle className="h-6 w-6" />
           </button>
-          <button onClick={() => {
-            if (navigator.share) {
-              navigator.share({ title: "Snapgram", url: `${window.location.origin}/post/${post.id}` }).catch(() => {});
-            } else {
-              navigator.clipboard.writeText(`${window.location.origin}/post/${post.id}`);
-            }
-          }}>
+          <button onClick={() => setShareOpen(true)}>
             <Send className="h-6 w-6" />
           </button>
         </div>
@@ -141,6 +137,7 @@ const PostCard = ({ post, onLikeToggle, onCommentOpen }: PostCardProps) => {
           {formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}
         </p>
       </div>
+      <SharePostDialog postId={post.id} open={shareOpen} onOpenChange={setShareOpen} />
     </article>
   );
 };

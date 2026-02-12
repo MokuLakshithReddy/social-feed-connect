@@ -134,7 +134,15 @@ const ChatConversation = () => {
                     : "bg-secondary text-secondary-foreground rounded-bl-md"
                 )}
               >
-                <p>{msg.content}</p>
+                <p>
+                  {/^https?:\/\/.*\/post\//.test(msg.content) ? (
+                    <a href={msg.content.match(/\/post\/[^\s]+/)?.[0] ?? msg.content} className="underline">
+                      📷 Shared a post
+                    </a>
+                  ) : (
+                    msg.content
+                  )}
+                </p>
                 <p className={cn("mt-1 text-[10px] opacity-60", isMine ? "text-right" : "text-left")}>
                   {formatDistanceToNow(new Date(msg.created_at), { addSuffix: true })}
                 </p>
