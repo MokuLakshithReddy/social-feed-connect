@@ -1,0 +1,71 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Set up Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Install Node Dependencies
+        run: npm install
+
+      - name: Build Web Application
+        env:
+          VITE_SUPABASE_PROJECT_ID: "tkkrarbllafbejpwajrg"
+          VITE_SUPABASE_PUBLISHABLE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRra3JhcmJsbGFmYmVqcHdhanJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA3NDIzNjMsImV4cCI6MjA4NjMxODM2M30.sW6ORdH4MSZllPRovZ2w6X8VgoH7VPRiXr_lyFK0nvY"
+          VITE_SUPABASE_URL: "https://tkkrarbllafbejpwajrg.supabase.co"
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Build Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Prepare APK file
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk social-feed-connect.apk
+
+      - name: Upload APK as Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: social-feed-connect-apk
+          path: social-feed-connect.apk
+
+      - name: Attach APK to GitHub Release v1.0.0
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: v1.0.0
+          files: social-feed-connect.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

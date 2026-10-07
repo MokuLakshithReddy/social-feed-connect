@@ -1,0 +1,9 @@
+{
+  "appId": "com.socialfeedconnect.app",
+  "appName": "Social Feed Connect",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}
