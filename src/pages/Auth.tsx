@@ -28,7 +28,11 @@ const Auth = () => {
         toast.success("Account created! Please check your email to verify.");
       }
     } catch (error: any) {
-      toast.error(error.message);
+      if (error?.message?.includes("Failed to fetch") || error?.name === "AuthRetryableFetchError") {
+        toast.error("Unable to connect to Supabase. Please ensure your Supabase project is unpaused and active.");
+      } else {
+        toast.error(error.message || "Authentication error occurred");
+      }
     } finally {
       setLoading(false);
     }
