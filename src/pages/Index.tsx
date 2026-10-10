@@ -96,7 +96,8 @@ const Index = () => {
         .eq("user_id", user.id)
         .eq("status", "active") as any);
 
-      const clubsList: JoinedClubSummary[] = (memberships || []).map((m: any) => ({
+      const rawMemberships = (memberships || []) as any[];
+      const clubsList: JoinedClubSummary[] = rawMemberships.map((m) => ({
         id: m.clubs.id,
         name: m.clubs.name,
         category: m.clubs.category,
@@ -105,8 +106,8 @@ const Index = () => {
       setJoinedClubs(clubsList);
 
       // 3. Fetch Upcoming Events & User Registrations
-      const { data: evData } = await (supabase
-        .from("events" as any)
+      const { data: evData } = await supabase
+        .from("events")
         .select(`
           id,
           club_id,
@@ -116,17 +117,18 @@ const Index = () => {
           clubs:club_id (name)
         `)
         .order("start_time", { ascending: true })
-        .limit(4) as any);
+        .limit(4);
 
-      const { data: regData } = await (supabase
-        .from("event_registrations" as any)
+      const { data: regData } = await supabase
+        .from("event_registrations")
         .select("event_id")
         .eq("user_id", user.id)
-        .eq("status", "registered") as any);
+        .eq("status", "registered");
 
-      const registeredIds = new Set((regData || []).map((r: any) => r.event_id));
+      const registeredIds = new Set(((regData || []) as { event_id: string }[]).map((r) => r.event_id));
+      const rawEvents = (evData || []) as any[];
 
-      const parsedEvents: UpcomingEvent[] = (evData || []).map((ev: any) => ({
+      const parsedEvents: UpcomingEvent[] = rawEvents.map((ev) => ({
         id: ev.id,
         club_id: ev.club_id,
         title: ev.title,
@@ -138,8 +140,8 @@ const Index = () => {
       setEvents(parsedEvents);
 
       // 4. Fetch Latest Official Announcements
-      const { data: notices } = await (supabase
-        .from("channel_messages" as any)
+      const { data: notices } = await supabase
+        .from("channel_messages")
         .select(`
           id,
           content,
@@ -152,11 +154,12 @@ const Index = () => {
           profiles:sender_id (username)
         `)
         .order("created_at", { ascending: false })
-        .limit(5) as any);
+        .limit(5);
 
-      const announcementNotices: AnnouncementNotice[] = (notices || [])
-        .filter((n: any) => n.club_channels?.type === "announcements")
-        .map((n: any) => ({
+      const rawNotices = (notices || []) as any[];
+      const announcementNotices: AnnouncementNotice[] = rawNotices
+        .filter((n) => n.club_channels?.type === "announcements")
+        .map((n) => ({
           id: n.id,
           club_id: n.club_channels.club_id,
           club_name: n.club_channels.clubs?.name || "Campus Club",
@@ -165,7 +168,7 @@ const Index = () => {
           sender_name: n.profiles?.username || "Coordinator",
         }));
       setAnnouncements(announcementNotices);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Dashboard error:", err);
     } finally {
       setLoading(false);
@@ -182,19 +185,16 @@ const Index = () => {
       if (ev.is_registered) {
         navigate("/events");
       } else {
-        const { error } = await (supabase
-          .from("event_registrations" as any)
-          .insert({
-            event_id: ev.id,
-            user_id: user.id,
-            status: "registered",
-          }) as any);
+        const { error } = await supabase.rpc("register_for_event", {
+          p_event_id: ev.id,
+        });
         if (error) throw error;
         toast.success("Successfully registered! Pass issued.");
         loadDashboard();
       }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to register");
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to register");
     }
   };
 

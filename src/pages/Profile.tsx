@@ -99,8 +99,8 @@ const Profile = () => {
       setProfile(profileData);
 
       // 2. Fetch Joined Clubs
-      const { data: memberships } = await (supabase
-        .from("club_memberships" as any)
+      const { data: memberships } = await supabase
+        .from("club_memberships")
         .select(`
           role,
           clubs:club_id (
@@ -110,9 +110,10 @@ const Profile = () => {
           )
         `)
         .eq("user_id", effectiveUserId)
-        .eq("status", "active") as any);
+        .eq("status", "active");
 
-      const clubsList: JoinedClub[] = (memberships || []).map((m: any) => ({
+      const rawMemberships = (memberships || []) as any[];
+      const clubsList: JoinedClub[] = rawMemberships.map((m) => ({
         id: m.clubs.id,
         name: m.clubs.name,
         category: m.clubs.category,
@@ -121,8 +122,8 @@ const Profile = () => {
       setJoinedClubs(clubsList);
 
       // 3. Fetch Registered Event Passes
-      const { data: regs } = await (supabase
-        .from("event_registrations" as any)
+      const { data: regs } = await supabase
+        .from("event_registrations")
         .select(`
           qr_code_token,
           events:event_id (
@@ -134,11 +135,12 @@ const Profile = () => {
           )
         `)
         .eq("user_id", effectiveUserId)
-        .eq("status", "registered") as any);
+        .eq("status", "registered");
 
-      const passes: UserEventPass[] = (regs || [])
-        .filter((r: any) => r.events)
-        .map((r: any) => ({
+      const rawRegs = (regs || []) as any[];
+      const passes: UserEventPass[] = rawRegs
+        .filter((r) => r.events)
+        .map((r) => ({
           id: r.events.id,
           title: r.events.title,
           venue: r.events.venue,

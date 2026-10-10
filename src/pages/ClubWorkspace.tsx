@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -24,63 +24,37 @@ import {
   Loader2,
   Clock,
   MapPin,
+  UserCheck,
+  UserX,
+  QrCode,
   CheckCircle2,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import {
+  Club,
+  ClubMembership,
+  ClubChannel,
+  ChannelMessage,
+  CampusEvent,
+  EventRegistration,
+  StudentProfile,
+  RegisterEventResult,
+  CheckInResult,
+} from "@/types/campus";
 
-interface ClubDetails {
-  id: string;
-  name: string;
-  description: string | null;
-  category: string;
-  faculty_coordinator: string | null;
-  status: string;
-  created_by: string;
-}
-
-interface MemberItem {
-  id: string;
-  user_id: string;
-  role: "president" | "organizer" | "member";
-  status: string;
+interface MemberWithProfile extends ClubMembership {
   username: string;
   avatar_url: string | null;
   department: string | null;
   year: string | null;
 }
 
-interface ChannelItem {
-  id: string;
-  name: string;
-  type: "announcements" | "general" | "project" | "events";
-  description: string | null;
-}
-
-interface MessageItem {
-  id: string;
-  channel_id: string;
-  sender_id: string;
-  content: string;
-  is_pinned: boolean;
-  created_at: string;
-  sender: {
-    username: string;
-    avatar_url: string | null;
-    department?: string | null;
-  };
-}
-
-interface EventItem {
-  id: string;
-  title: string;
-  description: string | null;
-  venue: string;
-  start_time: string;
-  capacity: number | null;
-  registration_count?: number;
-  is_registered?: boolean;
+interface EventWithMeta extends CampusEvent {
+  registration_count: number;
+  is_registered: boolean;
 }
 
 const ClubWorkspace = () => {
@@ -88,15 +62,17 @@ const ClubWorkspace = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const [club, setClub] = useState<ClubDetails | null>(null);
-  const [membership, setMembership] = useState<{ role: string; status: string } | null>(null);
-  const [channels, setChannels] = useState<ChannelItem[]>([]);
-  const [members, setMembers] = useState<MemberItem[]>([]);
-  const [events, setEvents] = useState<EventItem[]>([]);
+  const [club, setClub] = useState<Club | null>(null);
+  const [membership, setMembership] = useState<ClubMembership | null>(null);
+  const [channels, setChannels] = useState<ClubChannel[]>([]);
+  const [activeMembers, setActiveMembers] = useState<MemberWithProfile[]>([]);
+  const [pendingMembers, setPendingMembers] = useState<MemberWithProfile[]>([]);
+  const [events, setEvents] = useState<EventWithMeta[]>([]);
+  const [userProfile, setUserProfile] = useState<StudentProfile | null>(null);
 
   // Active channel state
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
-  const [messages, setMessages] = useState<MessageItem[]>([]);
+  const [messages, setMessages] = useState<ChannelMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -115,59 +91,78 @@ const ClubWorkspace = () => {
   const [announcementText, setAnnouncementText] = useState("");
   const [publishingNotice, setPublishingNotice] = useState(false);
 
+  // Attendance check-in modal
+  const [checkInEventId, setCheckInEventId] = useState<string | null>(null);
+  const [qrTokenInput, setQrTokenInput] = useState("");
+  const [checkingIn, setCheckingIn] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const isOrganizer = membership?.role === "president" || membership?.role === "organizer";
+  const isPresident = membership?.role === "president" && membership?.status === "active";
+  const isOrganizer = (membership?.role === "president" || membership?.role === "organizer") && membership?.status === "active";
+  const isActiveMember = membership?.status === "active";
+  const isPendingMember = membership?.status === "pending";
+  const isAdmin = userProfile?.college_role === "college_admin";
 
-  // Fetch club data
-  const loadClubData = async () => {
+  const loadClubData = useCallback(async () => {
     if (!clubId) return;
     try {
       setLoading(true);
 
-      // 1. Fetch Club
-      const { data: cData, error: cErr } = await (supabase
-        .from("clubs" as any)
-        .select("*")
-        .eq("id", clubId)
-        .single() as any);
-      if (cErr) throw cErr;
-      setClub(cData);
-
-      // 2. Fetch User Membership
+      // 1. Fetch User Profile
       if (user?.id) {
-        const { data: mData } = await (supabase
-          .from("club_memberships" as any)
-          .select("role, status")
-          .eq("club_id", clubId)
-          .eq("user_id", user.id)
-          .maybeSingle() as any);
-        setMembership(mData || null);
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (prof) setUserProfile(prof as unknown as StudentProfile);
       }
 
-      // 3. Fetch Channels
-      const { data: chData } = await (supabase
-        .from("club_channels" as any)
+      // 2. Fetch Club
+      const { data: cData, error: cErr } = await supabase
+        .from("clubs")
+        .select("*")
+        .eq("id", clubId)
+        .single();
+      if (cErr) throw cErr;
+      setClub(cData as unknown as Club);
+
+      // 3. Fetch User Membership
+      if (user?.id) {
+        const { data: mData } = await supabase
+          .from("club_memberships")
+          .select("*")
+          .eq("club_id", clubId)
+          .eq("user_id", user.id)
+          .maybeSingle();
+        setMembership((mData as unknown as ClubMembership) || null);
+      }
+
+      // 4. Fetch Channels
+      const { data: chData } = await supabase
+        .from("club_channels")
         .select("*")
         .eq("club_id", clubId)
-        .order("created_at", { ascending: true }) as any);
+        .order("created_at", { ascending: true });
 
-      const chList = chData || [];
+      const chList = (chData || []) as unknown as ClubChannel[];
       setChannels(chList);
       if (chList.length > 0 && !selectedChannelId) {
-        // Default to announcements or general
-        const defaultCh = chList.find((c: any) => c.type === "announcements") || chList[0];
+        const defaultCh = chList.find((c) => c.type === "announcements") || chList[0];
         setSelectedChannelId(defaultCh.id);
       }
 
-      // 4. Fetch Members with profiles
-      const { data: memData } = await (supabase
-        .from("club_memberships" as any)
+      // 5. Fetch Members (active and pending)
+      const { data: memData } = await supabase
+        .from("club_memberships")
         .select(`
           id,
+          club_id,
           user_id,
           role,
           status,
+          joined_at,
           profiles:user_id (
             username,
             avatar_url,
@@ -175,40 +170,43 @@ const ClubWorkspace = () => {
             year
           )
         `)
-        .eq("club_id", clubId)
-        .eq("status", "active") as any);
+        .eq("club_id", clubId);
 
       if (memData) {
-        const parsedMembers: MemberItem[] = memData.map((m: any) => ({
+        const parsedMembers: MemberWithProfile[] = memData.map((m: any) => ({
           id: m.id,
+          club_id: m.club_id,
           user_id: m.user_id,
           role: m.role,
           status: m.status,
+          joined_at: m.joined_at,
           username: m.profiles?.username || "Student",
           avatar_url: m.profiles?.avatar_url || null,
           department: m.profiles?.department || null,
           year: m.profiles?.year || null,
         }));
-        setMembers(parsedMembers);
+
+        setActiveMembers(parsedMembers.filter((m) => m.status === "active"));
+        setPendingMembers(parsedMembers.filter((m) => m.status === "pending"));
       }
 
-      // 5. Fetch Events
-      const { data: evData } = await (supabase
-        .from("events" as any)
+      // 6. Fetch Events & Registrations
+      const { data: evData } = await supabase
+        .from("events")
         .select("*")
         .eq("club_id", clubId)
-        .order("start_time", { ascending: true }) as any);
+        .order("start_time", { ascending: true });
 
       if (evData) {
-        // Fetch registrations
-        const { data: regData } = await (supabase
-          .from("event_registrations" as any)
-          .select("event_id, user_id") as any);
+        const rawEvents = evData as unknown as CampusEvent[];
+        const { data: regData } = await supabase
+          .from("event_registrations")
+          .select("event_id, user_id, status");
 
-        const regs = regData || [];
-        const enrichedEvents = evData.map((ev: any) => {
-          const evRegs = regs.filter((r: any) => r.event_id === ev.id);
-          const userReg = evRegs.some((r: any) => r.user_id === user?.id);
+        const regs = (regData || []) as unknown as EventRegistration[];
+        const enrichedEvents: EventWithMeta[] = rawEvents.map((ev) => {
+          const evRegs = regs.filter((r) => r.event_id === ev.id && r.status === "registered");
+          const userReg = regs.some((r) => r.event_id === ev.id && r.user_id === user?.id && r.status === "registered");
           return {
             ...ev,
             registration_count: evRegs.length,
@@ -217,20 +215,20 @@ const ClubWorkspace = () => {
         });
         setEvents(enrichedEvents);
       }
-    } catch (err: any) {
-      console.error("Error loading club:", err);
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error("Error loading club:", error);
       toast.error("Could not load club details");
     } finally {
       setLoading(false);
     }
-  };
+  }, [clubId, user?.id, selectedChannelId]);
 
-  // Fetch messages for selected channel
-  const loadChannelMessages = async (channelId: string) => {
+  const loadChannelMessages = useCallback(async (channelId: string) => {
     if (!channelId) return;
     try {
-      const { data, error } = await (supabase
-        .from("channel_messages" as any)
+      const { data, error } = await supabase
+        .from("channel_messages")
         .select(`
           id,
           channel_id,
@@ -245,11 +243,11 @@ const ClubWorkspace = () => {
           )
         `)
         .eq("channel_id", channelId)
-        .order("created_at", { ascending: true }) as any);
+        .order("created_at", { ascending: true });
 
       if (error) throw error;
 
-      const parsed: MessageItem[] = (data || []).map((m: any) => ({
+      const parsed: ChannelMessage[] = (data || []).map((m: any) => ({
         id: m.id,
         channel_id: m.channel_id,
         sender_id: m.sender_id,
@@ -257,28 +255,28 @@ const ClubWorkspace = () => {
         is_pinned: m.is_pinned,
         created_at: m.created_at,
         sender: {
+          id: m.sender_id,
           username: m.profiles?.username || "Student",
           avatar_url: m.profiles?.avatar_url || null,
           department: m.profiles?.department || null,
         },
       }));
       setMessages(parsed);
-    } catch (err: any) {
-      console.error("Error loading channel messages:", err);
+    } catch (err: unknown) {
+      console.error("Error loading messages:", err);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadClubData();
-  }, [clubId, user?.id]);
+  }, [loadClubData]);
 
   useEffect(() => {
-    if (selectedChannelId) {
+    if (selectedChannelId && (isActiveMember || isAdmin)) {
       loadChannelMessages(selectedChannelId);
 
-      // Realtime subscription for channel messages
       const sub = supabase
-        .channel(`channel_${selectedChannelId}`)
+        .channel(`workspace_channel_${selectedChannelId}`)
         .on(
           "postgres_changes",
           {
@@ -297,7 +295,7 @@ const ClubWorkspace = () => {
         supabase.removeChannel(sub);
       };
     }
-  }, [selectedChannelId]);
+  }, [selectedChannelId, isActiveMember, isAdmin, loadChannelMessages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -309,19 +307,20 @@ const ClubWorkspace = () => {
 
     try {
       setSendingMessage(true);
-      const { error } = await (supabase
-        .from("channel_messages" as any)
+      const { error } = await supabase
+        .from("channel_messages")
         .insert({
           channel_id: selectedChannelId,
           sender_id: user.id,
           content: newMessage.trim(),
-        }) as any);
+        });
 
       if (error) throw error;
       setNewMessage("");
       loadChannelMessages(selectedChannelId);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to send message. Verify membership permissions.");
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to post. Check membership permissions.");
     } finally {
       setSendingMessage(false);
     }
@@ -339,26 +338,24 @@ const ClubWorkspace = () => {
 
     try {
       setPublishingNotice(true);
-      const { error } = await (supabase
-        .from("channel_messages" as any)
+      const { error } = await supabase
+        .from("channel_messages")
         .insert({
           channel_id: announcementsCh.id,
           sender_id: user.id,
           content: announcementText.trim(),
           is_pinned: true,
-        }) as any);
+        });
 
       if (error) throw error;
-      toast.success("Official announcement broadcasted!");
+      toast.success("Official notice broadcasted to all club members!");
       setAnnouncementText("");
       setIsAnnouncementOpen(false);
-      if (selectedChannelId === announcementsCh.id) {
-        loadChannelMessages(announcementsCh.id);
-      } else {
-        setSelectedChannelId(announcementsCh.id);
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to publish announcement");
+      setSelectedChannelId(announcementsCh.id);
+      loadChannelMessages(announcementsCh.id);
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to broadcast notice");
     } finally {
       setPublishingNotice(false);
     }
@@ -370,8 +367,8 @@ const ClubWorkspace = () => {
 
     try {
       setCreatingEvent(true);
-      const { error } = await (supabase
-        .from("events" as any)
+      const { error } = await supabase
+        .from("events")
         .insert({
           club_id: clubId,
           title: eventTitle.trim(),
@@ -381,10 +378,10 @@ const ClubWorkspace = () => {
           capacity: eventCapacity ? parseInt(eventCapacity, 10) : null,
           is_published: true,
           created_by: user.id,
-        }) as any);
+        });
 
       if (error) throw error;
-      toast.success("Event scheduled & published!");
+      toast.success("Event scheduled and published!");
       setIsNewEventOpen(false);
       setEventTitle("");
       setEventDesc("");
@@ -392,10 +389,114 @@ const ClubWorkspace = () => {
       setEventDate("");
       setEventCapacity("");
       loadClubData();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to create event");
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to create event");
     } finally {
       setCreatingEvent(false);
+    }
+  };
+
+  // Membership request actions (Approve / Reject / Appoint Organizer)
+  const handleApproveMember = async (targetMemId: string, studentName: string) => {
+    try {
+      const { error } = await supabase
+        .from("club_memberships")
+        .update({ status: "active" })
+        .eq("id", targetMemId);
+
+      if (error) throw error;
+      toast.success(`Approved ${studentName}'s membership!`);
+      loadClubData();
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to approve membership");
+    }
+  };
+
+  const handleRejectMember = async (targetMemId: string, studentName: string) => {
+    try {
+      const { error } = await supabase
+        .from("club_memberships")
+        .delete()
+        .eq("id", targetMemId);
+
+      if (error) throw error;
+      toast.info(`Rejected ${studentName}'s request.`);
+      loadClubData();
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to reject membership");
+    }
+  };
+
+  const handlePromoteToOrganizer = async (targetMemId: string, studentName: string) => {
+    try {
+      const { error } = await supabase
+        .from("club_memberships")
+        .update({ role: "organizer" })
+        .eq("id", targetMemId);
+
+      if (error) throw error;
+      toast.success(`${studentName} appointed as Club Organizer!`);
+      loadClubData();
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to promote member");
+    }
+  };
+
+  // Atomic event registration via PostgreSQL stored procedure
+  const handleRegisterEventAtomic = async (ev: EventWithMeta) => {
+    if (!user?.id) return;
+    try {
+      if (ev.is_registered) {
+        const { data, error } = await supabase.rpc("cancel_event_registration", {
+          p_event_id: ev.id,
+        });
+        if (error) throw error;
+        toast.info("Registration cancelled.");
+      } else {
+        const { data, error } = await supabase.rpc("register_for_event", {
+          p_event_id: ev.id,
+        });
+        if (error) throw error;
+        const result = data as unknown as RegisterEventResult;
+        if (result.success) {
+          toast.success("Successfully registered! Digital Pass issued.");
+        }
+      }
+      loadClubData();
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Registration failed");
+    }
+  };
+
+  // Server-validated QR ticket check-in for organizers
+  const handleCheckInAttendee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!checkInEventId || !qrTokenInput.trim()) return;
+
+    try {
+      setCheckingIn(true);
+      const { data, error } = await supabase.rpc("check_in_event_attendee", {
+        p_event_id: checkInEventId,
+        p_qr_token: qrTokenInput.trim(),
+      });
+
+      if (error) throw error;
+      const result = data as unknown as CheckInResult;
+      if (result.success) {
+        toast.success(`Check-in verified! Welcome ${result.attendee_name || "attendee"}.`);
+        setQrTokenInput("");
+        setCheckInEventId(null);
+      }
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Invalid ticket or check-in failed");
+    } finally {
+      setCheckingIn(false);
     }
   };
 
@@ -403,52 +504,35 @@ const ClubWorkspace = () => {
     if (!clubId || !user?.id) return;
     try {
       if (membership) {
-        await (supabase
-          .from("club_memberships" as any)
+        await supabase
+          .from("club_memberships")
           .delete()
-          .match({ club_id: clubId, user_id: user.id }) as any);
-        toast.success(`Left ${club?.name}`);
+          .match({ club_id: clubId, user_id: user.id });
+        toast.success(`Membership updated.`);
         setMembership(null);
       } else {
-        await (supabase
-          .from("club_memberships" as any)
+        await supabase
+          .from("club_memberships")
           .insert({
             club_id: clubId,
             user_id: user.id,
             role: "member",
-            status: "active",
-          }) as any);
-        toast.success(`Joined ${club?.name}!`);
-        setMembership({ role: "member", status: "active" });
+            status: "pending",
+          });
+        toast.success(`Join request submitted to ${club?.name} organizers!`);
+        setMembership({
+          id: "",
+          club_id: clubId,
+          user_id: user.id,
+          role: "member",
+          status: "pending",
+          joined_at: new Date().toISOString(),
+        });
       }
       loadClubData();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update membership");
-    }
-  };
-
-  const handleRegisterEvent = async (ev: EventItem) => {
-    if (!user?.id) return;
-    try {
-      if (ev.is_registered) {
-        await (supabase
-          .from("event_registrations" as any)
-          .delete()
-          .match({ event_id: ev.id, user_id: user.id }) as any);
-        toast.success("Registration cancelled");
-      } else {
-        await (supabase
-          .from("event_registrations" as any)
-          .insert({
-            event_id: ev.id,
-            user_id: user.id,
-            status: "registered",
-          }) as any);
-        toast.success("You are registered! Ticket issued.");
-      }
-      loadClubData();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to register");
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to submit request");
     }
   };
 
@@ -490,11 +574,11 @@ const ClubWorkspace = () => {
           <div className="flex items-center gap-2">
             <Button
               size="sm"
-              variant={membership ? "outline" : "default"}
+              variant={isActiveMember ? "outline" : isPendingMember ? "secondary" : "default"}
               onClick={handleToggleJoin}
               className="h-7 text-xs rounded-full px-3"
             >
-              {membership ? "Joined" : "Join Club"}
+              {isActiveMember ? "Joined" : isPendingMember ? "Requested ⏳" : "Request Join"}
             </Button>
           </div>
         </header>
@@ -511,7 +595,7 @@ const ClubWorkspace = () => {
                 {membership?.role && (
                   <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-primary/20 text-[10px] capitalize">
                     <ShieldCheck className="h-3 w-3 mr-1" />
-                    {membership.role}
+                    {membership.role} ({membership.status})
                   </Badge>
                 )}
               </div>
@@ -525,18 +609,26 @@ const ClubWorkspace = () => {
 
           <div className="flex items-center gap-4 text-xs text-muted-foreground pt-1">
             <span className="flex items-center gap-1 font-medium text-foreground">
-              <Users className="h-3.5 w-3.5 text-primary" /> {members.length} Members
+              <Users className="h-3.5 w-3.5 text-primary" /> {activeMembers.length} Members
             </span>
             {club.faculty_coordinator && (
               <span className="flex items-center gap-1">
-                <GraduationCap className="h-3.5 w-3.5" /> Coordinator: {club.faculty_coordinator}
+                <GraduationCap className="h-3.5 w-3.5" /> Advisor: {club.faculty_coordinator}
               </span>
             )}
           </div>
 
+          {/* Pending Membership Notice */}
+          {isPendingMember && (
+            <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs flex items-center gap-2">
+              <Clock className="h-4 w-4 shrink-0" />
+              <span>Your membership request is pending approval by club organizers.</span>
+            </div>
+          )}
+
           {/* Organizer Quick Actions */}
-          {isOrganizer && (
-            <div className="flex items-center gap-2 pt-2 border-t border-border/50">
+          {(isOrganizer || isAdmin) && (
+            <div className="flex items-center gap-2 pt-2 border-t border-border/50 flex-wrap">
               <Dialog open={isAnnouncementOpen} onOpenChange={setIsAnnouncementOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm" variant="outline" className="h-7 text-xs gap-1 rounded-full">
@@ -549,7 +641,7 @@ const ClubWorkspace = () => {
                   </DialogHeader>
                   <form onSubmit={handlePublishAnnouncement} className="space-y-3 pt-2">
                     <Textarea
-                      placeholder="Write important announcement, schedules, or updates for all club members..."
+                      placeholder="Write important notice or agenda for all active club members..."
                       rows={4}
                       value={announcementText}
                       onChange={(e) => setAnnouncementText(e.target.value)}
@@ -605,21 +697,21 @@ const ClubWorkspace = () => {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label htmlFor="ev-cap">Capacity Limit</Label>
+                        <Label htmlFor="ev-cap">Seat Capacity Limit</Label>
                         <Input
                           id="ev-cap"
                           type="number"
-                          placeholder="e.g. 100"
+                          placeholder="e.g. 80"
                           value={eventCapacity}
                           onChange={(e) => setEventCapacity(e.target.value)}
                         />
                       </div>
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="ev-desc">Description & Agenda</Label>
+                      <Label htmlFor="ev-desc">Description & Prerequisites</Label>
                       <Textarea
                         id="ev-desc"
-                        placeholder="Workshop topics, prerequisites, key takeaways..."
+                        placeholder="Workshop topics, hands-on tasks..."
                         rows={3}
                         value={eventDesc}
                         onChange={(e) => setEventDesc(e.target.value)}
@@ -637,7 +729,7 @@ const ClubWorkspace = () => {
 
         {/* Club Navigation Tabs */}
         <Tabs defaultValue="channels" className="w-full">
-          <TabsList className="w-full justify-start rounded-none border-b bg-background px-4 h-11 gap-4">
+          <TabsList className="w-full justify-start rounded-none border-b bg-background px-4 h-11 gap-3 overflow-x-auto scrollbar-none">
             <TabsTrigger value="channels" className="text-xs gap-1 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
               <MessageSquare className="h-3.5 w-3.5" /> Channels
             </TabsTrigger>
@@ -645,107 +737,118 @@ const ClubWorkspace = () => {
               <Calendar className="h-3.5 w-3.5" /> Events ({events.length})
             </TabsTrigger>
             <TabsTrigger value="members" className="text-xs gap-1 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
-              <Users className="h-3.5 w-3.5" /> Members ({members.length})
+              <Users className="h-3.5 w-3.5" /> Members ({activeMembers.length})
             </TabsTrigger>
+            {(isOrganizer || isAdmin) && (
+              <TabsTrigger value="requests" className="text-xs gap-1 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none">
+                <Clock className="h-3.5 w-3.5 text-amber-500" /> Requests ({pendingMembers.length})
+              </TabsTrigger>
+            )}
           </TabsList>
 
-          {/* TAB 1: CHANNELS & COMMUNITY CHAT */}
+          {/* TAB 1: CHANNELS */}
           <TabsContent value="channels" className="m-0 p-0">
-            {/* Channel Pill Switcher */}
-            <div className="flex gap-1.5 overflow-x-auto p-3 border-b bg-muted/20 scrollbar-none">
-              {channels.map((ch) => {
-                const isAnnouncement = ch.type === "announcements";
-                return (
-                  <Button
-                    key={ch.id}
-                    size="sm"
-                    variant={selectedChannelId === ch.id ? "default" : "outline"}
-                    onClick={() => setSelectedChannelId(ch.id)}
-                    className="h-7 text-xs rounded-full gap-1.5 whitespace-nowrap px-3"
-                  >
-                    {isAnnouncement ? <Megaphone className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
-                    <span>#{ch.name}</span>
-                  </Button>
-                );
-              })}
-            </div>
-
-            {/* Chat Messages View */}
-            <div className="flex flex-col h-[calc(100vh-340px)]">
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {messages.length === 0 ? (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <p className="text-sm font-medium">No messages in #{activeChannel?.name || "channel"} yet.</p>
-                    <p className="text-xs mt-1">Be the first to start the conversation!</p>
-                  </div>
-                ) : (
-                  messages.map((msg) => {
-                    const isMe = msg.sender_id === user?.id;
-                    return (
-                      <div
-                        key={msg.id}
-                        className={`flex gap-2.5 ${isMe ? "flex-row-reverse" : "flex-row"}`}
-                      >
-                        <Avatar className="h-7 w-7 mt-0.5">
-                          <AvatarImage src={msg.sender.avatar_url || undefined} />
-                          <AvatarFallback className="text-[10px]">
-                            {msg.sender.username.slice(0, 2).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-
-                        <div className={`max-w-[80%] space-y-1 ${isMe ? "items-end" : "items-start"}`}>
-                          <div className={`flex items-center gap-1.5 text-[11px] ${isMe ? "justify-end" : "justify-start"}`}>
-                            <span className="font-semibold text-foreground">{msg.sender.username}</span>
-                            {msg.sender.department && (
-                              <span className="text-muted-foreground text-[10px]">({msg.sender.department.split(" ")[0]})</span>
-                            )}
-                            {msg.is_pinned && (
-                              <Badge variant="outline" className="text-[9px] h-4 gap-0.5 text-amber-500 border-amber-500/30">
-                                <Pin className="h-2.5 w-2.5" /> Pinned
-                              </Badge>
-                            )}
-                          </div>
-
-                          <div
-                            className={`p-2.5 rounded-2xl text-xs leading-relaxed ${
-                              isMe
-                                ? "bg-primary text-primary-foreground rounded-tr-none"
-                                : "bg-muted text-foreground rounded-tl-none border border-border/40"
-                            }`}
-                          >
-                            {msg.content}
-                          </div>
-                          <span className={`block text-[10px] text-muted-foreground px-1 ${isMe ? "text-right" : "text-left"}`}>
-                            {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                <div ref={messagesEndRef} />
+            {!isActiveMember && !isAdmin ? (
+              <div className="p-8 text-center text-muted-foreground space-y-3">
+                <Lock className="mx-auto h-10 w-10 opacity-40 text-primary" />
+                <h3 className="text-sm font-semibold text-foreground">Private Club Space</h3>
+                <p className="text-xs max-w-xs mx-auto">
+                  Channel discussions are reserved for approved members. Request membership above to participate.
+                </p>
               </div>
-
-              {/* Message Input */}
-              {activeChannel?.type === "announcements" && !isOrganizer ? (
-                <div className="p-3 border-t bg-muted/40 text-center text-xs text-muted-foreground">
-                  🔒 Only verified club organizers can broadcast notices in this announcement channel.
+            ) : (
+              <>
+                {/* Channel Switcher */}
+                <div className="flex gap-1.5 overflow-x-auto p-3 border-b bg-muted/20 scrollbar-none">
+                  {channels.map((ch) => (
+                    <Button
+                      key={ch.id}
+                      size="sm"
+                      variant={selectedChannelId === ch.id ? "default" : "outline"}
+                      onClick={() => setSelectedChannelId(ch.id)}
+                      className="h-7 text-xs rounded-full gap-1.5 whitespace-nowrap px-3"
+                    >
+                      {ch.type === "announcements" ? <Megaphone className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
+                      <span>#{ch.name}</span>
+                    </Button>
+                  ))}
                 </div>
-              ) : (
-                <form onSubmit={handleSendMessage} className="p-3 border-t bg-background flex items-center gap-2">
-                  <Input
-                    placeholder={`Message #${activeChannel?.name || "chat"}...`}
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    className="h-9 text-xs"
-                    disabled={sendingMessage}
-                  />
-                  <Button type="submit" size="icon" className="h-9 w-9 rounded-full shrink-0" disabled={sendingMessage || !newMessage.trim()}>
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </form>
-              )}
-            </div>
+
+                {/* Messages Feed */}
+                <div className="flex flex-col h-[calc(100vh-340px)]">
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {messages.length === 0 ? (
+                      <div className="text-center py-12 text-muted-foreground">
+                        <p className="text-sm font-medium">No messages in #{activeChannel?.name || "channel"} yet.</p>
+                        <p className="text-xs mt-1">Be the first to start the conversation!</p>
+                      </div>
+                    ) : (
+                      messages.map((msg) => {
+                        const isMe = msg.sender_id === user?.id;
+                        return (
+                          <div
+                            key={msg.id}
+                            className={`flex gap-2.5 ${isMe ? "flex-row-reverse" : "flex-row"}`}
+                          >
+                            <Avatar className="h-7 w-7 mt-0.5">
+                              <AvatarImage src={msg.sender?.avatar_url || undefined} />
+                              <AvatarFallback className="text-[10px]">
+                                {msg.sender?.username.slice(0, 2).toUpperCase() || "ST"}
+                              </AvatarFallback>
+                            </Avatar>
+
+                            <div className={`max-w-[80%] space-y-1 ${isMe ? "items-end" : "items-start"}`}>
+                              <div className={`flex items-center gap-1.5 text-[11px] ${isMe ? "justify-end" : "justify-start"}`}>
+                                <span className="font-semibold text-foreground">{msg.sender?.username}</span>
+                                {msg.is_pinned && (
+                                  <Badge variant="outline" className="text-[9px] h-4 gap-0.5 text-amber-500 border-amber-500/30">
+                                    <Pin className="h-2.5 w-2.5" /> Pinned
+                                  </Badge>
+                                )}
+                              </div>
+
+                              <div
+                                className={`p-2.5 rounded-2xl text-xs leading-relaxed ${
+                                  isMe
+                                    ? "bg-primary text-primary-foreground rounded-tr-none"
+                                    : "bg-muted text-foreground rounded-tl-none border border-border/40"
+                                }`}
+                              >
+                                {msg.content}
+                              </div>
+                              <span className={`block text-[10px] text-muted-foreground px-1 ${isMe ? "text-right" : "text-left"}`}>
+                                {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
+
+                  {/* Input bar */}
+                  {activeChannel?.type === "announcements" && !isOrganizer && !isAdmin ? (
+                    <div className="p-3 border-t bg-muted/40 text-center text-xs text-muted-foreground">
+                      🔒 Only authorized club organizers can broadcast notices in this announcement channel.
+                    </div>
+                  ) : (
+                    <form onSubmit={handleSendMessage} className="p-3 border-t bg-background flex items-center gap-2">
+                      <Input
+                        placeholder={`Message #${activeChannel?.name || "chat"}...`}
+                        value={newMessage}
+                        onChange={(e) => setNewMessage(e.target.value)}
+                        className="h-9 text-xs"
+                        disabled={sendingMessage}
+                      />
+                      <Button type="submit" size="icon" className="h-9 w-9 rounded-full shrink-0" disabled={sendingMessage || !newMessage.trim()}>
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </form>
+                  )}
+                </div>
+              </>
+            )}
           </TabsContent>
 
           {/* TAB 2: EVENTS */}
@@ -773,14 +876,26 @@ const ClubWorkspace = () => {
                           </span>
                         </div>
                       </div>
-                      <Button
-                        size="sm"
-                        variant={ev.is_registered ? "outline" : "default"}
-                        onClick={() => handleRegisterEvent(ev)}
-                        className="h-7 text-xs rounded-full"
-                      >
-                        {ev.is_registered ? "Registered ✓" : "Register"}
-                      </Button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {isOrganizer && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setCheckInEventId(ev.id)}
+                            className="h-7 text-xs rounded-full gap-1"
+                          >
+                            <QrCode className="h-3.5 w-3.5" /> Check-in
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant={ev.is_registered ? "outline" : "default"}
+                          onClick={() => handleRegisterEventAtomic(ev)}
+                          className="h-7 text-xs rounded-full"
+                        >
+                          {ev.is_registered ? "Registered ✓" : "Register"}
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   {ev.description && (
@@ -795,13 +910,15 @@ const ClubWorkspace = () => {
 
           {/* TAB 3: MEMBERS */}
           <TabsContent value="members" className="p-4 space-y-2">
-            {members.map((mem) => (
+            {activeMembers.map((mem) => (
               <div
                 key={mem.id}
-                onClick={() => navigate(`/profile/${mem.user_id}`)}
-                className="flex items-center justify-between p-2.5 rounded-lg border border-border/40 hover:bg-muted/30 cursor-pointer"
+                className="flex items-center justify-between p-2.5 rounded-lg border border-border/40 hover:bg-muted/30"
               >
-                <div className="flex items-center gap-2.5">
+                <div
+                  onClick={() => navigate(`/profile/${mem.user_id}`)}
+                  className="flex items-center gap-2.5 cursor-pointer flex-1"
+                >
                   <Avatar className="h-8 w-8">
                     <AvatarImage src={mem.avatar_url || undefined} />
                     <AvatarFallback className="text-xs">
@@ -824,10 +941,100 @@ const ClubWorkspace = () => {
                     )}
                   </div>
                 </div>
+
+                {/* President action: Appoint as Organizer */}
+                {isPresident && mem.role === "member" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handlePromoteToOrganizer(mem.id, mem.username)}
+                    className="h-7 text-[11px] rounded-full px-2.5"
+                  >
+                    Promote to Organizer
+                  </Button>
+                )}
               </div>
             ))}
           </TabsContent>
+
+          {/* TAB 4: PENDING JOIN REQUESTS (Organizers & Admins Only) */}
+          {(isOrganizer || isAdmin) && (
+            <TabsContent value="requests" className="p-4 space-y-2">
+              {pendingMembers.length === 0 ? (
+                <div className="text-center py-10 border border-dashed rounded-xl text-muted-foreground">
+                  <UserCheck className="h-8 w-8 mx-auto opacity-40 mb-2" />
+                  <p className="text-xs">No pending join requests.</p>
+                </div>
+              ) : (
+                pendingMembers.map((req) => (
+                  <div
+                    key={req.id}
+                    className="flex items-center justify-between p-3 rounded-xl border bg-muted/20"
+                  >
+                    <div>
+                      <span className="text-xs font-bold text-foreground">{req.username}</span>
+                      <p className="text-[10px] text-muted-foreground">
+                        {req.department || "Student"} {req.year ? `· ${req.year}` : ""}
+                      </p>
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                        Requested: {new Date(req.joined_at).toLocaleDateString()}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => handleApproveMember(req.id, req.username)}
+                        className="h-7 text-xs rounded-full gap-1 bg-emerald-600 hover:bg-emerald-700"
+                      >
+                        <UserCheck className="h-3 w-3" /> Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleRejectMember(req.id, req.username)}
+                        className="h-7 text-xs rounded-full gap-1 text-destructive hover:bg-destructive/10"
+                      >
+                        <UserX className="h-3 w-3" /> Reject
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </TabsContent>
+          )}
         </Tabs>
+
+        {/* Organizer Ticket Check-in Dialog */}
+        <Dialog open={!!checkInEventId} onOpenChange={(open) => !open && setCheckInEventId(null)}>
+          <DialogContent className="max-w-xs p-5">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold flex items-center gap-1.5">
+                <QrCode className="h-5 w-5 text-primary" /> Scan / Verify Attendance
+              </DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleCheckInAttendee} className="space-y-3 pt-2">
+              <p className="text-xs text-muted-foreground">
+                Enter the attendee's 8-character Pass ID or token to validate their ticket.
+              </p>
+              <div className="space-y-1">
+                <Label htmlFor="qr-token">Pass ID / QR Token</Label>
+                <Input
+                  id="qr-token"
+                  placeholder="e.g. 3a5f8b9c"
+                  value={qrTokenInput}
+                  onChange={(e) => setQrTokenInput(e.target.value)}
+                  className="font-mono text-sm"
+                  required
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={checkingIn}>
+                {checkingIn ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Confirm Attendance"}
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );

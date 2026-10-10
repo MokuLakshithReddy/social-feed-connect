@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
   Calendar,
   Clock,
@@ -17,20 +17,12 @@ import {
   QrCode,
   Ticket,
   CheckCircle2,
-  XCircle,
   Loader2,
-  Share2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { CampusEvent, EventRegistration, RegisterEventResult } from "@/types/campus";
 
-interface CampusEventWithMeta {
-  id: string;
-  club_id: string;
-  title: string;
-  description: string | null;
-  venue: string;
-  start_time: string;
-  capacity: number | null;
+interface EventItemWithMeta extends CampusEvent {
   club_name: string;
   club_category: string;
   registration_count: number;
@@ -42,19 +34,19 @@ const Events = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const [events, setEvents] = useState<CampusEventWithMeta[]>([]);
+  const [events, setEvents] = useState<EventItemWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "registered">("all");
-  const [selectedTicket, setSelectedTicket] = useState<CampusEventWithMeta | null>(null);
+  const [selectedTicket, setSelectedTicket] = useState<EventItemWithMeta | null>(null);
 
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     try {
       setLoading(true);
 
       // Fetch events with club info
-      const { data: evData, error: evErr } = await (supabase
-        .from("events" as any)
+      const { data: evData, error: evErr } = await supabase
+        .from("events")
         .select(`
           *,
           clubs:club_id (
@@ -62,29 +54,35 @@ const Events = () => {
             category
           )
         `)
-        .order("start_time", { ascending: true }) as any);
+        .order("start_time", { ascending: true });
 
       if (evErr) throw evErr;
 
       // Fetch all registrations
-      const { data: regData } = await (supabase
-        .from("event_registrations" as any)
-        .select("event_id, user_id, qr_code_token, status") as any);
+      const { data: regData } = await supabase
+        .from("event_registrations")
+        .select("event_id, user_id, qr_code_token, status");
 
-      const allRegs = regData || [];
+      const allRegs = (regData || []) as unknown as EventRegistration[];
+      const rawEvents = (evData || []) as any[];
 
-      const enriched: CampusEventWithMeta[] = (evData || []).map((ev: any) => {
-        const evRegs = allRegs.filter((r: any) => r.event_id === ev.id && r.status === "registered");
-        const userReg = allRegs.find((r: any) => r.event_id === ev.id && r.user_id === user?.id && r.status === "registered");
+      const enriched: EventItemWithMeta[] = rawEvents.map((ev) => {
+        const evRegs = allRegs.filter((r) => r.event_id === ev.id && r.status === "registered");
+        const userReg = allRegs.find((r) => r.event_id === ev.id && r.user_id === user?.id && r.status === "registered");
 
         return {
           id: ev.id,
           club_id: ev.club_id,
           title: ev.title,
           description: ev.description,
+          poster_url: ev.poster_url,
           venue: ev.venue,
           start_time: ev.start_time,
+          end_time: ev.end_time,
           capacity: ev.capacity,
+          is_published: ev.is_published,
+          created_by: ev.created_by,
+          created_at: ev.created_at,
           club_name: ev.clubs?.name || "Campus Club",
           club_category: ev.clubs?.category || "Activity",
           registration_count: evRegs.length,
@@ -94,48 +92,44 @@ const Events = () => {
       });
 
       setEvents(enriched);
-    } catch (err: any) {
-      console.error("Error loading events:", err);
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error("Error loading events:", error);
       toast.error("Failed to load events");
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id]);
 
   useEffect(() => {
     fetchEvents();
-  }, [user?.id]);
+  }, [fetchEvents]);
 
-  const handleRegisterToggle = async (ev: CampusEventWithMeta) => {
+  // Atomic event registration via stored procedure
+  const handleRegisterToggle = async (ev: EventItemWithMeta) => {
     if (!user?.id) return;
     try {
       if (ev.is_registered) {
-        const { error } = await (supabase
-          .from("event_registrations" as any)
-          .delete()
-          .match({ event_id: ev.id, user_id: user.id }) as any);
+        const { error } = await supabase.rpc("cancel_event_registration", {
+          p_event_id: ev.id,
+        });
         if (error) throw error;
-        toast.success(`Cancelled registration for ${ev.title}`);
+        toast.info(`Cancelled registration for ${ev.title}`);
+        if (selectedTicket?.id === ev.id) setSelectedTicket(null);
       } else {
-        // Check capacity
-        if (ev.capacity && ev.registration_count >= ev.capacity) {
-          toast.error("Event is full! Waitlist only.");
-          return;
-        }
-
-        const { error } = await (supabase
-          .from("event_registrations" as any)
-          .insert({
-            event_id: ev.id,
-            user_id: user.id,
-            status: "registered",
-          }) as any);
+        const { data, error } = await supabase.rpc("register_for_event", {
+          p_event_id: ev.id,
+        });
         if (error) throw error;
-        toast.success("Successfully registered! Check your ticket.");
+        const result = data as unknown as RegisterEventResult;
+        if (result.success) {
+          toast.success("Successfully registered! Ticket pass generated.");
+        }
       }
       fetchEvents();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update registration");
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to update registration");
     }
   };
 
@@ -338,10 +332,6 @@ const Events = () => {
                         minute: "2-digit",
                       })}
                     </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Attendee:</span>
-                    <span className="font-medium text-foreground">{user?.email?.split("@")[0] || "Student"}</span>
                   </div>
                 </div>
 

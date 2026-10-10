@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -6,24 +6,18 @@ import AppLayout from "@/components/AppLayout";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
-import { Search, Users, GraduationCap, ChevronRight, Plus, Check, Loader2 } from "lucide-react";
+import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Search, Users, GraduationCap, ChevronRight, Plus, Check, Clock, Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Club, ClubMembership, StudentProfile, MembershipStatus } from "@/types/campus";
 
-interface ClubWithMeta {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  category: string;
-  faculty_coordinator: string | null;
-  status: string;
+interface ClubWithMeta extends Club {
   member_count: number;
-  is_member: boolean;
-  member_role?: string;
+  membership_status: MembershipStatus | null;
+  membership_role?: string;
 }
 
 const CATEGORIES = [
@@ -39,6 +33,7 @@ const Clubs = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [clubs, setClubs] = useState<ClubWithMeta[]>([]);
+  const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
@@ -51,84 +46,104 @@ const Clubs = () => {
   const [newClubDescription, setNewClubDescription] = useState("");
   const [newClubCoordinator, setNewClubCoordinator] = useState("");
 
-  const fetchClubs = async () => {
+  const isAdmin = profile?.college_role === "college_admin";
+
+  const fetchClubs = useCallback(async () => {
     try {
       setLoading(true);
+
+      // Fetch user profile to check role
+      if (user?.id) {
+        const { data: profData } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (profData) {
+          setProfile(profData as unknown as StudentProfile);
+        }
+      }
+
       // Fetch clubs
-      const { data: clubsData, error: clubsErr } = await (supabase
-        .from("clubs" as any)
+      const { data: clubsData, error: clubsErr } = await supabase
+        .from("clubs")
         .select("*")
-        .order("name", { ascending: true }) as any);
+        .order("name", { ascending: true });
 
       if (clubsErr) throw clubsErr;
 
       // Fetch memberships
-      const { data: membersData } = await (supabase
-        .from("club_memberships" as any)
-        .select("club_id, user_id, role, status") as any);
+      const { data: membersData } = await supabase
+        .from("club_memberships")
+        .select("club_id, user_id, role, status");
 
-      const memberships = membersData || [];
+      const memberships = (membersData || []) as unknown as ClubMembership[];
 
-      const enriched: ClubWithMeta[] = (clubsData || []).map((club: any) => {
-        const clubMembers = memberships.filter((m: any) => m.club_id === club.id && m.status === "active");
-        const userMem = clubMembers.find((m: any) => m.user_id === user?.id);
+      const rawClubs = (clubsData || []) as unknown as Club[];
+      const enriched: ClubWithMeta[] = rawClubs.map((club) => {
+        const activeMembers = memberships.filter((m) => m.club_id === club.id && m.status === "active");
+        const userMem = memberships.find((m) => m.club_id === club.id && m.user_id === user?.id);
 
         return {
-          id: club.id,
-          name: club.name,
-          slug: club.slug,
-          description: club.description,
-          category: club.category,
-          faculty_coordinator: club.faculty_coordinator,
-          status: club.status,
-          member_count: clubMembers.length,
-          is_member: !!userMem,
-          member_role: userMem?.role,
+          ...club,
+          member_count: activeMembers.length,
+          membership_status: userMem ? userMem.status : null,
+          membership_role: userMem?.role,
         };
       });
 
       setClubs(enriched);
-    } catch (err: any) {
-      console.error("Error fetching clubs:", err);
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error("Error fetching clubs:", error);
       toast.error("Failed to load clubs");
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id]);
 
   useEffect(() => {
     fetchClubs();
-  }, [user?.id]);
+  }, [fetchClubs]);
 
   const handleJoinToggle = async (club: ClubWithMeta, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!user?.id) return;
 
     try {
-      if (club.is_member) {
+      if (club.membership_status === "active") {
         // Leave club
-        const { error } = await (supabase
-          .from("club_memberships" as any)
+        const { error } = await supabase
+          .from("club_memberships")
           .delete()
-          .match({ club_id: club.id, user_id: user.id }) as any);
+          .match({ club_id: club.id, user_id: user.id });
         if (error) throw error;
         toast.success(`Left ${club.name}`);
+      } else if (club.membership_status === "pending") {
+        // Withdraw request
+        const { error } = await supabase
+          .from("club_memberships")
+          .delete()
+          .match({ club_id: club.id, user_id: user.id });
+        if (error) throw error;
+        toast.info(`Cancelled membership request for ${club.name}`);
       } else {
-        // Join club
-        const { error } = await (supabase
-          .from("club_memberships" as any)
+        // Request membership (strictly status = pending, role = member)
+        const { error } = await supabase
+          .from("club_memberships")
           .insert({
             club_id: club.id,
             user_id: user.id,
             role: "member",
-            status: "active",
-          }) as any);
+            status: "pending",
+          });
         if (error) throw error;
-        toast.success(`Joined ${club.name}! Welcome aboard.`);
+        toast.success(`Request sent to ${club.name} organizers for approval!`);
       }
       fetchClubs();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update membership");
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to update membership");
     }
   };
 
@@ -140,8 +155,10 @@ const Clubs = () => {
       setIsSubmitting(true);
       const slug = newClubName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
-      const { data: newClub, error } = await (supabase
-        .from("clubs" as any)
+      const initialStatus = isAdmin ? "active" : "pending_approval";
+
+      const { data: newClubData, error } = await supabase
+        .from("clubs")
         .insert({
           name: newClubName.trim(),
           slug,
@@ -149,40 +166,49 @@ const Clubs = () => {
           description: newClubDescription.trim(),
           faculty_coordinator: newClubCoordinator.trim() || null,
           created_by: user.id,
-          status: "active",
+          status: initialStatus,
         })
         .select()
-        .single() as any);
+        .single();
 
       if (error) throw error;
 
-      // Auto-assign creator as president
-      await (supabase
-        .from("club_memberships" as any)
-        .insert({
-          club_id: newClub.id,
-          user_id: user.id,
-          role: "president",
-          status: "active",
-        }) as any);
+      const createdClub = newClubData as unknown as Club;
 
-      // Create default channels
-      await (supabase
-        .from("club_channels" as any)
-        .insert([
-          { club_id: newClub.id, name: "announcements", type: "announcements", description: "Official notices" },
-          { club_id: newClub.id, name: "general", type: "general", description: "General community chat" },
-        ]) as any);
+      if (isAdmin) {
+        // Assign admin as president and create default channels
+        await supabase
+          .from("club_memberships")
+          .insert({
+            club_id: createdClub.id,
+            user_id: user.id,
+            role: "president",
+            status: "active",
+          });
 
-      toast.success("Club created successfully!");
-      setIsCreateOpen(false);
+        await supabase
+          .from("club_channels")
+          .insert([
+            { club_id: createdClub.id, name: "announcements", type: "announcements", description: "Official notices" },
+            { club_id: createdClub.id, name: "general", type: "general", description: "General community chat" },
+          ]);
+
+        toast.success("Club created and activated!");
+        setIsCreateOpen(false);
+        fetchClubs();
+        navigate(`/club/${createdClub.id}`);
+      } else {
+        toast.success("Club proposal submitted! Pending College Administrator approval.");
+        setIsCreateOpen(false);
+        fetchClubs();
+      }
+
       setNewClubName("");
       setNewClubDescription("");
       setNewClubCoordinator("");
-      fetchClubs();
-      navigate(`/club/${newClub.id}`);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to create club");
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to submit club proposal");
     } finally {
       setIsSubmitting(false);
     }
@@ -203,20 +229,34 @@ const Clubs = () => {
         <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur px-4 py-3">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-bold tracking-tight text-foreground">Campus Clubs</h1>
-              <p className="text-xs text-muted-foreground">Discover, join & collaborate with university student organizations</p>
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-xl font-bold tracking-tight text-foreground">Campus Clubs</h1>
+                {isAdmin && (
+                  <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
+                    <ShieldCheck className="h-3 w-3 mr-0.5" /> Admin
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">Discover, join & collaborate with student organizations</p>
             </div>
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
               <DialogTrigger asChild>
                 <Button size="sm" className="h-8 gap-1 rounded-full text-xs">
-                  <Plus className="h-3.5 w-3.5" /> Start Club
+                  <Plus className="h-3.5 w-3.5" /> {isAdmin ? "Create Club" : "Propose Club"}
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-md">
                 <DialogHeader>
-                  <DialogTitle>Register New Campus Club</DialogTitle>
+                  <DialogTitle>
+                    {isAdmin ? "Launch New Campus Club" : "Submit Campus Club Proposal"}
+                  </DialogTitle>
                 </DialogHeader>
-                <form onSubmit={handleCreateClub} className="space-y-4 pt-2">
+                {!isAdmin && (
+                  <p className="text-xs text-muted-foreground bg-muted/50 p-2.5 rounded-lg border">
+                    ℹ️ Club proposals are reviewed by college administrators before being officially activated.
+                  </p>
+                )}
+                <form onSubmit={handleCreateClub} className="space-y-4 pt-1">
                   <div className="space-y-1.5">
                     <Label htmlFor="club-name">Club Name</Label>
                     <Input
@@ -252,17 +292,23 @@ const Clubs = () => {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="club-desc">About the Club</Label>
+                    <Label htmlFor="club-desc">About the Club & Objectives</Label>
                     <Textarea
                       id="club-desc"
-                      placeholder="Describe the club mission, projects, and activities..."
+                      placeholder="Describe the club mission, planned activities, and faculty advisor..."
                       rows={3}
                       value={newClubDescription}
                       onChange={(e) => setNewClubDescription(e.target.value)}
                     />
                   </div>
                   <Button type="submit" className="w-full" disabled={isSubmitting}>
-                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Launch Club"}
+                    {isSubmitting ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : isAdmin ? (
+                      "Launch Club"
+                    ) : (
+                      "Submit Proposal for Review"
+                    )}
                   </Button>
                 </form>
               </DialogContent>
@@ -311,66 +357,83 @@ const Clubs = () => {
               <p className="text-xs mt-1">Try a different search term or category filter.</p>
             </div>
           ) : (
-            filteredClubs.map((club) => (
-              <Card
-                key={club.id}
-                onClick={() => navigate(`/club/${club.id}`)}
-                className="cursor-pointer border-border/60 hover:border-primary/50 transition-all hover:shadow-sm"
-              >
-                <CardHeader className="p-4 pb-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <CardTitle className="text-base font-semibold leading-tight hover:text-primary transition-colors">
-                          {club.name}
-                        </CardTitle>
-                      </div>
-                      <Badge variant="secondary" className="mt-1 text-[10px] font-normal px-2 py-0">
-                        {club.category}
-                      </Badge>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant={club.is_member ? "outline" : "default"}
-                      onClick={(e) => handleJoinToggle(club, e)}
-                      className="h-7 px-3 text-xs rounded-full gap-1 shrink-0"
-                    >
-                      {club.is_member ? (
-                        <>
-                          <Check className="h-3 w-3 text-primary" />
-                          <span>Joined</span>
-                        </>
-                      ) : (
-                        <span>Join</span>
-                      )}
-                    </Button>
-                  </div>
-                  {club.description && (
-                    <CardDescription className="line-clamp-2 text-xs pt-2">
-                      {club.description}
-                    </CardDescription>
-                  )}
-                </CardHeader>
+            filteredClubs.map((club) => {
+              const isPending = club.membership_status === "pending";
+              const isActive = club.membership_status === "active";
 
-                <CardFooter className="p-4 pt-2 flex items-center justify-between text-[11px] text-muted-foreground border-t border-border/40 mt-2">
-                  <div className="flex items-center gap-3">
-                    <span className="flex items-center gap-1">
-                      <Users className="h-3.5 w-3.5" />
-                      {club.member_count} {club.member_count === 1 ? "member" : "members"}
-                    </span>
-                    {club.faculty_coordinator && (
-                      <span className="flex items-center gap-1 truncate max-w-[150px]">
-                        <GraduationCap className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{club.faculty_coordinator}</span>
-                      </span>
+              return (
+                <Card
+                  key={club.id}
+                  onClick={() => navigate(`/club/${club.id}`)}
+                  className="cursor-pointer border-border/60 hover:border-primary/50 transition-all hover:shadow-sm"
+                >
+                  <CardHeader className="p-4 pb-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <CardTitle className="text-base font-semibold leading-tight hover:text-primary transition-colors">
+                            {club.name}
+                          </CardTitle>
+                          {club.status === "pending_approval" && (
+                            <Badge variant="outline" className="text-[9px] text-amber-500 border-amber-500/30">
+                              Pending Review
+                            </Badge>
+                          )}
+                        </div>
+                        <Badge variant="secondary" className="mt-1 text-[10px] font-normal px-2 py-0">
+                          {club.category}
+                        </Badge>
+                      </div>
+
+                      {/* Join / Requested / Joined Button */}
+                      <Button
+                        size="sm"
+                        variant={isActive ? "outline" : isPending ? "secondary" : "default"}
+                        onClick={(e) => handleJoinToggle(club, e)}
+                        className="h-7 px-3 text-xs rounded-full gap-1 shrink-0"
+                      >
+                        {isActive ? (
+                          <>
+                            <Check className="h-3 w-3 text-primary" />
+                            <span>Joined</span>
+                          </>
+                        ) : isPending ? (
+                          <>
+                            <Clock className="h-3 w-3 text-amber-500" />
+                            <span>Requested</span>
+                          </>
+                        ) : (
+                          <span>Request Join</span>
+                        )}
+                      </Button>
+                    </div>
+                    {club.description && (
+                      <CardDescription className="line-clamp-2 text-xs pt-2">
+                        {club.description}
+                      </CardDescription>
                     )}
-                  </div>
-                  <span className="flex items-center gap-0.5 text-primary font-medium text-xs">
-                    View Space <ChevronRight className="h-3.5 w-3.5" />
-                  </span>
-                </CardFooter>
-              </Card>
-            ))
+                  </CardHeader>
+
+                  <CardFooter className="p-4 pt-2 flex items-center justify-between text-[11px] text-muted-foreground border-t border-border/40 mt-2">
+                    <div className="flex items-center gap-3">
+                      <span className="flex items-center gap-1">
+                        <Users className="h-3.5 w-3.5" />
+                        {club.member_count} {club.member_count === 1 ? "member" : "members"}
+                      </span>
+                      {club.faculty_coordinator && (
+                        <span className="flex items-center gap-1 truncate max-w-[150px]">
+                          <GraduationCap className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{club.faculty_coordinator}</span>
+                        </span>
+                      )}
+                    </div>
+                    <span className="flex items-center gap-0.5 text-primary font-medium text-xs">
+                      View Space <ChevronRight className="h-3.5 w-3.5" />
+                    </span>
+                  </CardFooter>
+                </Card>
+              );
+            })
           )}
         </div>
       </div>
