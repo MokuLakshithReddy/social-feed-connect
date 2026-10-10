@@ -1,4 +1,4 @@
-import { Home, Search, PlusSquare, MessageCircle, User } from "lucide-react";
+import { LayoutDashboard, Users, Calendar, MessageSquare, User } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useUnreadMessages } from "@/hooks/useUnreadMessages";
@@ -13,39 +13,44 @@ const BottomNav = () => {
   const profilePath = user?.id ? `/profile/${user.id}` : "/profile";
 
   const items = [
-    { icon: Home, path: "/", label: "Home" },
-    { icon: Search, path: "/explore", label: "Explore" },
-    { icon: PlusSquare, path: "/create", label: "Create" },
-    { icon: MessageCircle, path: "/chats", label: "Chats", badge: unreadCount },
+    { icon: LayoutDashboard, path: "/", label: "Campus" },
+    { icon: Users, path: "/clubs", label: "Clubs" },
+    { icon: Calendar, path: "/events", label: "Events" },
+    { icon: MessageSquare, path: "/chats", label: "Messages", badge: unreadCount },
     { icon: User, path: profilePath, label: "Profile" },
   ];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="mx-auto flex max-w-lg items-center justify-around py-2">
+      <div className="mx-auto flex max-w-lg items-center justify-around py-1.5 px-2">
         {items.map(({ icon: Icon, path, label, badge }) => {
           const isActive = label === "Profile"
             ? location.pathname.startsWith("/profile")
-            : location.pathname === path;
+            : location.pathname === path || (path === "/clubs" && location.pathname.startsWith("/club/"));
           return (
             <button
               key={path}
               onClick={() => {
-                if (label === "Chats") clearUnread();
+                if (label === "Messages") clearUnread();
                 navigate(path);
               }}
               className={cn(
-                "relative flex flex-col items-center gap-0.5 p-2 transition-colors",
-                isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                "relative flex flex-col items-center gap-1 py-1 px-3 rounded-lg transition-all",
+                isActive
+                  ? "text-primary font-medium"
+                  : "text-muted-foreground hover:text-foreground"
               )}
               aria-label={label}
             >
-              <Icon className={cn("h-6 w-6", isActive && "fill-current")} strokeWidth={isActive ? 2.5 : 1.5} />
-              {badge && badge > 0 && (
-                <span className="absolute -right-1 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">
-                  {badge > 99 ? "99+" : badge}
-                </span>
-              )}
+              <div className="relative">
+                <Icon className={cn("h-5 w-5 transition-transform", isActive && "scale-110")} strokeWidth={isActive ? 2.5 : 1.75} />
+                {badge && badge > 0 ? (
+                  <span className="absolute -right-2 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold text-destructive-foreground">
+                    {badge > 99 ? "99+" : badge}
+                  </span>
+                ) : null}
+              </div>
+              <span className="text-[11px] leading-none tracking-tight">{label}</span>
             </button>
           );
         })}

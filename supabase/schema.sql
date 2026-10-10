@@ -127,10 +127,24 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+  base_username TEXT;
+  final_username TEXT;
 BEGIN
+  base_username := TRIM(COALESCE(NEW.raw_user_meta_data->>'username', 'user_' || LEFT(NEW.id::text, 8)));
+  IF base_username = '' THEN
+    base_username := 'user_' || LEFT(NEW.id::text, 8);
+  END IF;
+
+  final_username := base_username;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE username = final_username AND id != NEW.id) THEN
+    final_username := base_username || '_' || LEFT(NEW.id::text, 4);
+  END IF;
+
   INSERT INTO public.profiles (id, username)
-  VALUES (NEW.id, COALESCE(NEW.raw_user_meta_data->>'username', 'user_' || LEFT(NEW.id::text, 8)))
+  VALUES (NEW.id, final_username)
   ON CONFLICT (id) DO NOTHING;
+
   RETURN NEW;
 END;
 $$;
@@ -142,10 +156,28 @@ CREATE TRIGGER on_auth_user_created
   EXECUTE FUNCTION public.handle_new_user();
 
 -- Backfill any existing auth users who registered before the trigger existed
-INSERT INTO public.profiles (id, username)
-SELECT id, COALESCE(raw_user_meta_data->>'username', 'user_' || LEFT(id::text, 8))
-FROM auth.users
-ON CONFLICT (id) DO NOTHING;
+DO $$
+DECLARE
+  u RECORD;
+  base_u TEXT;
+  final_u TEXT;
+BEGIN
+  FOR u IN SELECT id, raw_user_meta_data FROM auth.users ORDER BY created_at ASC LOOP
+    base_u := TRIM(COALESCE(u.raw_user_meta_data->>'username', 'user_' || LEFT(u.id::text, 8)));
+    IF base_u = '' THEN
+      base_u := 'user_' || LEFT(u.id::text, 8);
+    END IF;
+
+    final_u := base_u;
+    IF EXISTS (SELECT 1 FROM public.profiles WHERE username = final_u AND id != u.id) THEN
+      final_u := base_u || '_' || LEFT(u.id::text, 4);
+    END IF;
+
+    INSERT INTO public.profiles (id, username)
+    VALUES (u.id, final_u)
+    ON CONFLICT (id) DO NOTHING;
+  END LOOP;
+END $$;
 
 -- 7. Updated_at trigger
 CREATE OR REPLACE FUNCTION public.update_updated_at_column()
