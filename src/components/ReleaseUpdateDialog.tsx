@@ -7,9 +7,9 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Sparkles, ImagePlus, UserCheck, Zap } from "lucide-react";
+import { GraduationCap, Users, Calendar, Ticket } from "lucide-react";
 
-export const CURRENT_APP_VERSION = "1.1.0";
+export const CURRENT_APP_VERSION = "1.2.0";
 const STORAGE_KEY = "seen_release_version";
 
 interface ReleaseUpdateDialogProps {
@@ -50,50 +50,50 @@ export const ReleaseUpdateDialog = ({ forceOpen, onClose }: ReleaseUpdateDialogP
       <DialogContent className="max-w-md rounded-2xl p-6 sm:rounded-2xl">
         <DialogHeader className="text-center sm:text-center items-center">
           <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Sparkles className="h-7 w-7 animate-pulse" />
+            <GraduationCap className="h-8 w-8 text-primary" />
           </div>
           <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary mb-1">
-            New Release v{CURRENT_APP_VERSION}
+            Welcome to CampusConnect v{CURRENT_APP_VERSION}
           </div>
-          <DialogTitle className="text-xl font-bold">What's New in this Update</DialogTitle>
+          <DialogTitle className="text-xl font-bold">College Clubs & Events Platform</DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
-            We've resolved critical issues to give you a seamless experience!
+            Your university's dedicated digital workspace for student clubs and activities.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="my-4 space-y-3.5">
+        <div className="my-4 space-y-3">
           <div className="flex items-start gap-3 rounded-xl bg-secondary/50 p-3">
             <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
-              <ImagePlus className="h-5 w-5" />
+              <Users className="h-5 w-5" />
             </div>
             <div className="flex-1 text-left">
-              <h4 className="text-sm font-semibold">Post Uploads Fixed</h4>
+              <h4 className="text-sm font-semibold">Club Discovery & Workspaces</h4>
               <p className="text-xs text-muted-foreground">
-                Resolved the "Bucket not found" error when sharing images. You can now post photos freely!
+                Join technical, cultural, and sports clubs with dedicated spaces for announcements and group discussions.
               </p>
             </div>
           </div>
 
           <div className="flex items-start gap-3 rounded-xl bg-secondary/50 p-3">
             <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
-              <UserCheck className="h-5 w-5" />
+              <Calendar className="h-5 w-5" />
             </div>
             <div className="flex-1 text-left">
-              <h4 className="text-sm font-semibold">Account Profile Restored</h4>
+              <h4 className="text-sm font-semibold">Campus Event Calendar</h4>
               <p className="text-xs text-muted-foreground">
-                Fixed the "User not found" issue. Your profile, avatar, post feed, and followers now load instantly.
+                Discover workshops, hackathons, and seminars. 1-click registration with real-time seat limits.
               </p>
             </div>
           </div>
 
           <div className="flex items-start gap-3 rounded-xl bg-secondary/50 p-3">
             <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
-              <Zap className="h-5 w-5" />
+              <Ticket className="h-5 w-5" />
             </div>
             <div className="flex-1 text-left">
-              <h4 className="text-sm font-semibold">Stability & Speed Improvements</h4>
+              <h4 className="text-sm font-semibold">Digital Attendance Passes</h4>
               <p className="text-xs text-muted-foreground">
-                Smoother bottom navigation and automatic account synchronization across devices.
+                Get an instant QR attendance pass for registered events right inside your student wallet.
               </p>
             </div>
           </div>
@@ -103,7 +103,7 @@ export const ReleaseUpdateDialog = ({ forceOpen, onClose }: ReleaseUpdateDialogP
           onClick={handleDismiss}
           className="h-11 w-full rounded-xl text-sm font-semibold shadow"
         >
-          Got it, let's explore!
+          Explore CampusConnect
         </Button>
       </DialogContent>
     </Dialog>
