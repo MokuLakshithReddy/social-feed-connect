@@ -10,19 +10,23 @@ const BottomNav = () => {
   const { user } = useAuth();
   const { unreadCount, clearUnread } = useUnreadMessages();
 
+  const profilePath = user?.id ? `/profile/${user.id}` : "/profile";
+
   const items = [
     { icon: Home, path: "/", label: "Home" },
     { icon: Search, path: "/explore", label: "Explore" },
     { icon: PlusSquare, path: "/create", label: "Create" },
     { icon: MessageCircle, path: "/chats", label: "Chats", badge: unreadCount },
-    { icon: User, path: `/profile/${user?.id}`, label: "Profile" },
+    { icon: User, path: profilePath, label: "Profile" },
   ];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="mx-auto flex max-w-lg items-center justify-around py-2">
         {items.map(({ icon: Icon, path, label, badge }) => {
-          const isActive = location.pathname === path;
+          const isActive = label === "Profile"
+            ? location.pathname.startsWith("/profile")
+            : location.pathname === path;
           return (
             <button
               key={path}

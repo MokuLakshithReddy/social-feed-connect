@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import FollowersDialog from "@/components/FollowersDialog";
 
 const Profile = () => {
-  const { userId } = useParams();
+  const { userId: paramUserId } = useParams();
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -22,25 +22,47 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [followDialog, setFollowDialog] = useState<"followers" | "following" | null>(null);
 
-  const isOwn = user?.id === userId;
+  const effectiveUserId = (paramUserId && paramUserId !== "undefined") ? paramUserId : user?.id;
+  const isOwn = !!user && user.id === effectiveUserId;
 
   const fetchProfile = async () => {
-    if (!userId) return;
+    if (!effectiveUserId) {
+      setLoading(false);
+      return;
+    }
+
     const [profileRes, postsRes, followersRes, followingRes] = await Promise.all([
-      supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
-      supabase.from("posts").select("id, image_url").eq("user_id", userId).order("created_at", { ascending: false }),
-      supabase.from("followers").select("id", { count: "exact" }).eq("following_id", userId),
-      supabase.from("followers").select("id", { count: "exact" }).eq("follower_id", userId),
+      supabase.from("profiles").select("*").eq("id", effectiveUserId).maybeSingle(),
+      supabase.from("posts").select("id, image_url").eq("user_id", effectiveUserId).order("created_at", { ascending: false }),
+      supabase.from("followers").select("id", { count: "exact" }).eq("following_id", effectiveUserId),
+      supabase.from("followers").select("id", { count: "exact" }).eq("follower_id", effectiveUserId),
     ]);
-    setProfile(profileRes.data);
+
+    let profileData = profileRes.data;
+
+    // Self-healing: if own profile doesn't exist yet in database, create it
+    if (!profileData && isOwn && user) {
+      const defaultUsername = user.user_metadata?.username || `user_${user.id.slice(0, 8)}`;
+      const { data: createdProfile } = await supabase
+        .from("profiles")
+        .upsert({ id: user.id, username: defaultUsername })
+        .select("*")
+        .maybeSingle();
+
+      if (createdProfile) {
+        profileData = createdProfile;
+      }
+    }
+
+    setProfile(profileData);
     setPosts(postsRes.data ?? []);
     setFollowersCount(followersRes.count ?? 0);
     setFollowingCount(followingRes.count ?? 0);
 
-    if (user && user.id !== userId) {
+    if (user && user.id !== effectiveUserId) {
       const { data } = await supabase
         .from("followers").select("id")
-        .eq("follower_id", user.id).eq("following_id", userId).maybeSingle();
+        .eq("follower_id", user.id).eq("following_id", effectiveUserId).maybeSingle();
       setIsFollowing(!!data);
     }
     setLoading(false);
@@ -49,14 +71,14 @@ const Profile = () => {
   useEffect(() => {
     setLoading(true);
     fetchProfile();
-  }, [userId, user]);
+  }, [effectiveUserId, user?.id]);
 
   const toggleFollow = async () => {
-    if (!user || !userId) return;
+    if (!user || !effectiveUserId) return;
     if (isFollowing) {
-      await supabase.from("followers").delete().eq("follower_id", user.id).eq("following_id", userId);
+      await supabase.from("followers").delete().eq("follower_id", user.id).eq("following_id", effectiveUserId);
     } else {
-      await supabase.from("followers").insert({ follower_id: user.id, following_id: userId });
+      await supabase.from("followers").insert({ follower_id: user.id, following_id: effectiveUserId });
     }
     setIsFollowing(!isFollowing);
     setFollowersCount((c) => c + (isFollowing ? -1 : 1));
@@ -80,12 +102,12 @@ const Profile = () => {
   };
 
   const handleMessage = async () => {
-    if (!user || !userId) return;
+    if (!user || !effectiveUserId) return;
     // Check for existing conversation
     const { data: existing } = await supabase
       .from("conversations")
       .select("id")
-      .or(`and(user1_id.eq.${user.id},user2_id.eq.${userId}),and(user1_id.eq.${userId},user2_id.eq.${user.id})`)
+      .or(`and(user1_id.eq.${user.id},user2_id.eq.${effectiveUserId}),and(user1_id.eq.${effectiveUserId},user2_id.eq.${user.id})`)
       .maybeSingle();
 
     if (existing) {
