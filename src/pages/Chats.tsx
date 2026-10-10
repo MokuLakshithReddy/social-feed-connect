@@ -48,33 +48,50 @@ const Chats = () => {
 
       const profileMap = new Map(profiles?.map((p) => [p.id, p]) ?? []);
 
-      // Get last message for each conversation
-      const results: ConversationWithProfile[] = [];
-      for (const c of convos) {
-        const otherUserId = c.user1_id === user.id ? c.user2_id : c.user1_id;
-        const profile = profileMap.get(otherUserId);
-        const { data: msgs } = await supabase
-          .from("messages")
-          .select("content")
-          .eq("conversation_id", c.id)
-          .order("created_at", { ascending: false })
-          .limit(1);
+      // Fetch last messages in parallel
+      const results: ConversationWithProfile[] = await Promise.all(
+        convos.map(async (c) => {
+          const otherUserId = c.user1_id === user.id ? c.user2_id : c.user1_id;
+          const profile = profileMap.get(otherUserId);
+          const { data: msgs } = await supabase
+            .from("messages")
+            .select("content")
+            .eq("conversation_id", c.id)
+            .order("created_at", { ascending: false })
+            .limit(1);
 
-        results.push({
-          id: c.id,
-          otherUserId,
-          username: profile?.username ?? "Unknown",
-          avatar_url: profile?.avatar_url ?? null,
-          lastMessage: msgs?.[0]?.content ?? null,
-          lastMessageAt: c.last_message_at,
-        });
-      }
+          return {
+            id: c.id,
+            otherUserId,
+            username: profile?.username ?? "Unknown",
+            avatar_url: profile?.avatar_url ?? null,
+            lastMessage: msgs?.[0]?.content ?? null,
+            lastMessageAt: c.last_message_at,
+          };
+        })
+      );
 
       setConversations(results);
       setLoading(false);
     };
 
     fetchConversations();
+
+    // Realtime subscription to reload conversation updates
+    const channel = supabase
+      .channel("chats-list-updates")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversations" },
+        () => {
+          fetchConversations();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   return (

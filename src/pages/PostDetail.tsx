@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import AppLayout from "@/components/AppLayout";
@@ -6,13 +6,24 @@ import PostCard from "@/components/PostCard";
 import CommentsSheet from "@/components/CommentsSheet";
 import { ArrowLeft } from "lucide-react";
 
+interface PostDetailItem {
+  id: string;
+  user_id: string;
+  image_url: string;
+  caption: string;
+  created_at: string;
+  profiles: { username: string; avatar_url: string };
+  likes: { user_id: string }[];
+  comments: { id: string }[];
+}
+
 const PostDetail = () => {
   const { postId } = useParams();
   const navigate = useNavigate();
-  const [post, setPost] = useState<any>(null);
+  const [post, setPost] = useState<PostDetailItem | null>(null);
   const [commentPostId, setCommentPostId] = useState<string | null>(null);
 
-  const fetchPost = async () => {
+  const fetchPost = useCallback(async () => {
     if (!postId) return;
     const { data } = await supabase
       .from("posts")
@@ -23,12 +34,12 @@ const PostDetail = () => {
       navigate("/", { replace: true });
       return;
     }
-    setPost(data);
-  };
+    setPost(data as unknown as PostDetailItem);
+  }, [postId, navigate]);
 
   useEffect(() => {
     fetchPost();
-  }, [postId]);
+  }, [fetchPost]);
 
   const handlePostDeleted = () => {
     navigate("/", { replace: true });

@@ -57,11 +57,11 @@ jobs:
           name: social-feed-connect-apk
           path: social-feed-connect.apk
 
-      - name: Attach APK to GitHub Release v1.0.0
+      - name: Attach APK to GitHub Release
         uses: softprops/action-gh-release@v2
-        if: success()
+        if: startsWith(github.ref, 'refs/tags/') || success()
         with:
-          tag_name: v1.0.0
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.1.0' }}
           files: social-feed-connect.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

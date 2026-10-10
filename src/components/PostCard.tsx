@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Heart, MessageCircle, Send } from "lucide-react";
 import PostActions from "@/components/PostActions";
 import SharePostDialog from "@/components/SharePostDialog";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
+import { toast } from "sonner";
 
 interface PostCardProps {
   post: {
@@ -34,6 +35,11 @@ const PostCard = ({ post, onLikeToggle, onCommentOpen }: PostCardProps) => {
   const [showHeart, setShowHeart] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
+  useEffect(() => {
+    setLiked(isLiked);
+    setLikeCount(post.likes?.length ?? 0);
+  }, [post.likes, isLiked]);
+
   const toggleLike = async () => {
     if (!user) return;
     const newLiked = !liked;
@@ -41,9 +47,21 @@ const PostCard = ({ post, onLikeToggle, onCommentOpen }: PostCardProps) => {
     setLikeCount((c) => c + (newLiked ? 1 : -1));
 
     if (newLiked) {
-      await supabase.from("likes").insert({ user_id: user.id, post_id: post.id });
+      const { error } = await supabase.from("likes").insert({ user_id: user.id, post_id: post.id });
+      if (error) {
+        setLiked(!newLiked);
+        setLikeCount((c) => c - 1);
+        toast.error("Could not like post");
+        return;
+      }
     } else {
-      await supabase.from("likes").delete().eq("user_id", user.id).eq("post_id", post.id);
+      const { error } = await supabase.from("likes").delete().eq("user_id", user.id).eq("post_id", post.id);
+      if (error) {
+        setLiked(!newLiked);
+        setLikeCount((c) => c + 1);
+        toast.error("Could not unlike post");
+        return;
+      }
     }
     onLikeToggle?.();
   };
@@ -75,7 +93,12 @@ const PostCard = ({ post, onLikeToggle, onCommentOpen }: PostCardProps) => {
           </div>
           <span className="text-sm font-semibold">{post.profiles?.username}</span>
         </button>
-        <PostActions postId={post.id} postUserId={post.user_id} onDeleted={onLikeToggle} />
+        <PostActions
+          postId={post.id}
+          postUserId={post.user_id}
+          imageUrl={post.image_url}
+          onDeleted={onLikeToggle}
+        />
       </div>
 
       {/* Image */}

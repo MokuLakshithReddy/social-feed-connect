@@ -21,6 +21,17 @@ const CreatePost = () => {
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
+
+    if (!f.type.startsWith("image/")) {
+      toast.error("Please select a valid image file");
+      return;
+    }
+
+    if (f.size > 10 * 1024 * 1024) {
+      toast.error("Image file size must be less than 10MB");
+      return;
+    }
+
     setFile(f);
     setPreview(URL.createObjectURL(f));
   };
@@ -28,23 +39,32 @@ const CreatePost = () => {
   const handleSubmit = async () => {
     if (!user || !file) return;
     setLoading(true);
+    let uploadedPath: string | null = null;
+
     try {
-      const ext = file.name.split(".").pop();
+      const ext = file.name.split(".").pop() || "jpg";
       const path = `${user.id}/${Date.now()}.${ext}`;
+      uploadedPath = path;
+
       const { error: uploadError } = await supabase.storage.from("posts").upload(path, file);
       if (uploadError) throw uploadError;
 
       const { error: insertError } = await supabase.from("posts").insert({
         user_id: user.id,
         image_url: path,
-        caption,
+        caption: caption.trim(),
       });
-      if (insertError) throw insertError;
+      if (insertError) {
+        // Rollback uploaded storage file
+        await supabase.storage.from("posts").remove([path]);
+        throw insertError;
+      }
 
       toast.success("Post shared!");
       navigate("/");
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to create post");
     } finally {
       setLoading(false);
     }

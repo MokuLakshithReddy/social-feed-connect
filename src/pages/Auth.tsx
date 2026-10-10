@@ -27,7 +27,8 @@ const Auth = () => {
         await signUp(email, password, username);
         toast.success("Account created! Please check your email to verify.");
       }
-    } catch (error: any) {
+    } catch (err: unknown) {
+      const error = err as Error;
       if (error?.message?.includes("Failed to fetch") || error?.name === "AuthRetryableFetchError") {
         toast.error("Unable to connect to Supabase. Please ensure your Supabase project is unpaused and active.");
       } else {

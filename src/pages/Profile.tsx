@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -9,13 +9,25 @@ import { Grid3X3, LogOut, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import FollowersDialog from "@/components/FollowersDialog";
 
+interface UserProfileData {
+  id: string;
+  username: string;
+  bio?: string | null;
+  avatar_url?: string | null;
+}
+
+interface ProfilePostItem {
+  id: string;
+  image_url: string;
+}
+
 const Profile = () => {
   const { userId: paramUserId } = useParams();
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [profile, setProfile] = useState<any>(null);
-  const [posts, setPosts] = useState<any[]>([]);
+  const [profile, setProfile] = useState<UserProfileData | null>(null);
+  const [posts, setPosts] = useState<ProfilePostItem[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -25,7 +37,7 @@ const Profile = () => {
   const effectiveUserId = (paramUserId && paramUserId !== "undefined") ? paramUserId : user?.id;
   const isOwn = !!user && user.id === effectiveUserId;
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     if (!effectiveUserId) {
       setLoading(false);
       return;
@@ -38,7 +50,7 @@ const Profile = () => {
       supabase.from("followers").select("id", { count: "exact" }).eq("follower_id", effectiveUserId),
     ]);
 
-    let profileData = profileRes.data;
+    let profileData = profileRes.data as UserProfileData | null;
 
     // Self-healing: if own profile doesn't exist yet in database, create it
     if (!profileData && isOwn && user) {
@@ -50,12 +62,12 @@ const Profile = () => {
         .maybeSingle();
 
       if (createdProfile) {
-        profileData = createdProfile;
+        profileData = createdProfile as UserProfileData;
       }
     }
 
     setProfile(profileData);
-    setPosts(postsRes.data ?? []);
+    setPosts((postsRes.data as unknown as ProfilePostItem[]) ?? []);
     setFollowersCount(followersRes.count ?? 0);
     setFollowingCount(followingRes.count ?? 0);
 
@@ -66,12 +78,12 @@ const Profile = () => {
       setIsFollowing(!!data);
     }
     setLoading(false);
-  };
+  }, [effectiveUserId, isOwn, user]);
 
   useEffect(() => {
     setLoading(true);
     fetchProfile();
-  }, [effectiveUserId, user?.id]);
+  }, [fetchProfile]);
 
   const toggleFollow = async () => {
     if (!user || !effectiveUserId) return;

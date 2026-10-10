@@ -200,8 +200,12 @@ CREATE TABLE IF NOT EXISTS public.conversations (
   user2_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   last_message_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-  UNIQUE(user1_id, user2_id)
+  CHECK (user1_id != user2_id)
 );
+
+-- Ensure order-independent unique conversation pair between two users
+CREATE UNIQUE INDEX IF NOT EXISTS unique_conversation_pair
+  ON public.conversations (LEAST(user1_id, user2_id), GREATEST(user1_id, user2_id));
 
 CREATE TABLE IF NOT EXISTS public.messages (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -259,7 +263,95 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON public.messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_users ON public.conversations(user1_id, user2_id);
 
--- 10. Enable realtime
+-- 10. Notifications table
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  actor_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  post_id UUID REFERENCES public.posts(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  read BOOLEAN NOT NULL DEFAULT false
+);
+
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Users can view own notifications') THEN
+    CREATE POLICY "Users can view own notifications"
+      ON public.notifications FOR SELECT
+      USING (auth.uid() = user_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Auth users can create notifications') THEN
+    CREATE POLICY "Auth users can create notifications"
+      ON public.notifications FOR INSERT
+      WITH CHECK (auth.uid() = actor_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Users can update own notifications') THEN
+    CREATE POLICY "Users can update own notifications"
+      ON public.notifications FOR UPDATE
+      USING (auth.uid() = user_id);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id, created_at DESC);
+
+-- Automatic notification triggers for likes, comments, and follows
+CREATE OR REPLACE FUNCTION public.handle_new_like_notification()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_post_author UUID;
+BEGIN
+  SELECT user_id INTO v_post_author FROM public.posts WHERE id = NEW.post_id;
+  IF v_post_author IS NOT NULL AND v_post_author != NEW.user_id THEN
+    INSERT INTO public.notifications (user_id, actor_id, type, post_id)
+    VALUES (v_post_author, NEW.user_id, 'like', NEW.post_id);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_like_created ON public.likes;
+CREATE TRIGGER on_like_created
+  AFTER INSERT ON public.likes
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_like_notification();
+
+CREATE OR REPLACE FUNCTION public.handle_new_comment_notification()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_post_author UUID;
+BEGIN
+  SELECT user_id INTO v_post_author FROM public.posts WHERE id = NEW.post_id;
+  IF v_post_author IS NOT NULL AND v_post_author != NEW.user_id THEN
+    INSERT INTO public.notifications (user_id, actor_id, type, post_id)
+    VALUES (v_post_author, NEW.user_id, 'comment', NEW.post_id);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_comment_created ON public.comments;
+CREATE TRIGGER on_comment_created
+  AFTER INSERT ON public.comments
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_comment_notification();
+
+CREATE OR REPLACE FUNCTION public.handle_new_follower_notification()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  IF NEW.following_id != NEW.follower_id THEN
+    INSERT INTO public.notifications (user_id, actor_id, type)
+    VALUES (NEW.following_id, NEW.follower_id, 'follow');
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_follower_created ON public.followers;
+CREATE TRIGGER on_follower_created
+  AFTER INSERT ON public.followers
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_follower_notification();
+
+-- 11. Enable realtime
 DO $$ BEGIN
   BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.posts;
@@ -275,6 +367,10 @@ DO $$ BEGIN
   END;
   BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
+  EXCEPTION WHEN duplicate_object THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
   EXCEPTION WHEN duplicate_object THEN NULL;
   END;
 END $$;

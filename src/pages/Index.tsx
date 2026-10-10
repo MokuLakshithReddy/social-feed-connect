@@ -1,18 +1,31 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import AppLayout from "@/components/AppLayout";
 import PostCard from "@/components/PostCard";
 import CommentsSheet from "@/components/CommentsSheet";
-import { Camera } from "lucide-react";
+import { Camera, Heart } from "lucide-react";
+
+interface PostItem {
+  id: string;
+  user_id: string;
+  image_url: string;
+  caption: string;
+  created_at: string;
+  profiles: { username: string; avatar_url: string };
+  likes: { user_id: string }[];
+  comments: { id: string }[];
+}
 
 const Index = () => {
   const { user } = useAuth();
-  const [posts, setPosts] = useState<any[]>([]);
+  const navigate = useNavigate();
+  const [posts, setPosts] = useState<PostItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [commentPostId, setCommentPostId] = useState<string | null>(null);
 
-  const fetchFeed = async () => {
+  const fetchFeed = useCallback(async () => {
     if (!user) return;
     // Get followed user IDs
     const { data: follows } = await supabase
@@ -30,19 +43,42 @@ const Index = () => {
       .order("created_at", { ascending: false })
       .limit(50);
 
-    setPosts(data ?? []);
+    setPosts((data as unknown as PostItem[]) ?? []);
     setLoading(false);
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchFeed();
-  }, [user]);
+
+    // Realtime subscription for new posts
+    const channel = supabase
+      .channel("feed-posts")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "posts" },
+        () => {
+          fetchFeed();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchFeed]);
 
   return (
     <AppLayout>
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur px-4 py-3">
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b bg-background/95 backdrop-blur px-4 py-3">
         <h1 className="text-xl font-bold tracking-tight">Snapgram</h1>
+        <button
+          onClick={() => navigate("/notifications")}
+          className="rounded-full p-1.5 transition-colors hover:bg-secondary"
+          aria-label="Notifications"
+        >
+          <Heart className="h-6 w-6 text-foreground" />
+        </button>
       </header>
 
       {loading ? (

@@ -8,15 +8,30 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
+import { toast } from "sonner";
+
+interface ChatMessage {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+}
+
+interface ChatUserProfile {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+}
 
 const ChatConversation = () => {
   const { conversationId } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
   const bottomRef = useRef<HTMLDivElement>(null);
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
-  const [otherUser, setOtherUser] = useState<any>(null);
+  const [otherUser, setOtherUser] = useState<ChatUserProfile | null>(null);
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
@@ -44,7 +59,7 @@ const ChatConversation = () => {
         .select("*")
         .eq("conversation_id", conversationId)
         .order("created_at", { ascending: true });
-      setMessages(msgs ?? []);
+      setMessages((msgs as unknown as ChatMessage[]) ?? []);
     };
 
     fetchData();
@@ -61,7 +76,7 @@ const ChatConversation = () => {
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new]);
+          setMessages((prev) => [...prev, payload.new as ChatMessage]);
         }
       )
       .subscribe();
@@ -77,22 +92,30 @@ const ChatConversation = () => {
 
   const handleSend = async () => {
     if (!newMessage.trim() || !user || !conversationId || sending) return;
-    setSending(true);
     const content = newMessage.trim();
-    setNewMessage("");
+    setSending(true);
 
-    await supabase.from("messages").insert({
-      conversation_id: conversationId,
-      sender_id: user.id,
-      content,
-    });
+    try {
+      const { error: msgErr } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        sender_id: user.id,
+        content,
+      });
 
-    await supabase
-      .from("conversations")
-      .update({ last_message_at: new Date().toISOString() })
-      .eq("id", conversationId);
+      if (msgErr) throw msgErr;
 
-    setSending(false);
+      setNewMessage("");
+
+      await supabase
+        .from("conversations")
+        .update({ last_message_at: new Date().toISOString() })
+        .eq("id", conversationId);
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error?.message || "Failed to send message");
+    } finally {
+      setSending(false);
+    }
   };
 
   const avatarUrl = getAvatarUrl(otherUser?.avatar_url);

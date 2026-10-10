@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { getAvatarUrl } from "@/lib/supabase-helpers";
 import { formatDistanceToNow } from "date-fns";
+import { toast } from "sonner";
 
 interface Comment {
   id: string;
@@ -28,11 +29,7 @@ const CommentsSheet = ({ postId, open, onOpenChange }: CommentsSheetProps) => {
   const [newComment, setNewComment] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (postId && open) fetchComments();
-  }, [postId, open]);
-
-  const fetchComments = async () => {
+  const fetchComments = useCallback(async () => {
     if (!postId) return;
     const { data } = await supabase
       .from("comments")
@@ -40,19 +37,31 @@ const CommentsSheet = ({ postId, open, onOpenChange }: CommentsSheetProps) => {
       .eq("post_id", postId)
       .order("created_at", { ascending: true });
     setComments((data as unknown as Comment[]) ?? []);
-  };
+  }, [postId]);
+
+  useEffect(() => {
+    if (postId && open) fetchComments();
+  }, [postId, open, fetchComments]);
 
   const addComment = async () => {
     if (!user || !postId || !newComment.trim()) return;
     setLoading(true);
-    await supabase.from("comments").insert({
-      user_id: user.id,
-      post_id: postId,
-      content: newComment.trim(),
-    });
-    setNewComment("");
-    await fetchComments();
-    setLoading(false);
+    const content = newComment.trim();
+    try {
+      const { error } = await supabase.from("comments").insert({
+        user_id: user.id,
+        post_id: postId,
+        content,
+      });
+      if (error) throw error;
+      setNewComment("");
+      await fetchComments();
+    } catch (err: unknown) {
+      const error = err as Error;
+      toast.error(error.message || "Failed to add comment");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

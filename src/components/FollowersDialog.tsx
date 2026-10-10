@@ -11,9 +11,15 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
+interface FollowerUser {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+}
+
 const FollowersDialog = ({ userId, type, open, onOpenChange }: Props) => {
   const navigate = useNavigate();
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<FollowerUser[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -25,13 +31,15 @@ const FollowersDialog = ({ userId, type, open, onOpenChange }: Props) => {
           .from("followers")
           .select("follower_id, profiles:follower_id(id, username, avatar_url)")
           .eq("following_id", userId);
-        setUsers(data?.map((d) => d.profiles) ?? []);
+        const rawList = (data as unknown as Array<{ profiles: FollowerUser | null }>) ?? [];
+        setUsers(rawList.map((d) => d.profiles).filter((p): p is FollowerUser => Boolean(p)));
       } else {
         const { data } = await supabase
           .from("followers")
           .select("following_id, profiles:following_id(id, username, avatar_url)")
           .eq("follower_id", userId);
-        setUsers(data?.map((d) => d.profiles) ?? []);
+        const rawList = (data as unknown as Array<{ profiles: FollowerUser | null }>) ?? [];
+        setUsers(rawList.map((d) => d.profiles).filter((p): p is FollowerUser => Boolean(p)));
       }
       setLoading(false);
     };
@@ -52,7 +60,7 @@ const FollowersDialog = ({ userId, type, open, onOpenChange }: Props) => {
           <p className="py-8 text-center text-sm text-muted-foreground">No {type} yet</p>
         ) : (
           <div className="max-h-80 overflow-y-auto divide-y">
-            {users.map((u: any) => (
+            {users.map((u) => (
               <button
                 key={u.id}
                 onClick={() => { onOpenChange(false); navigate(`/profile/${u.id}`); }}

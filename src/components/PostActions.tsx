@@ -13,10 +13,11 @@ import { MoreHorizontal, Trash2, Share2, Link } from "lucide-react";
 interface Props {
   postId: string;
   postUserId: string;
+  imageUrl?: string;
   onDeleted?: () => void;
 }
 
-const PostActions = ({ postId, postUserId, onDeleted }: Props) => {
+const PostActions = ({ postId, postUserId, imageUrl, onDeleted }: Props) => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const isOwn = user?.id === postUserId;
@@ -27,6 +28,9 @@ const PostActions = ({ postId, postUserId, onDeleted }: Props) => {
     if (error) {
       toast.error("Failed to delete post");
     } else {
+      if (imageUrl && !imageUrl.startsWith("http")) {
+        await supabase.storage.from("posts").remove([imageUrl]);
+      }
       toast.success("Post deleted");
       onDeleted?.();
     }
@@ -44,7 +48,9 @@ const PostActions = ({ postId, postUserId, onDeleted }: Props) => {
           title: "Check out this post on Snapgram",
           url: `${window.location.origin}/post/${postId}`,
         });
-      } catch {}
+      } catch {
+        // User cancelled share dialog
+      }
     } else {
       handleCopyLink();
     }
