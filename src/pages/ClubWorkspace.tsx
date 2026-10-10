@@ -397,13 +397,12 @@ const ClubWorkspace = () => {
     }
   };
 
-  // Membership request actions (Approve / Reject / Appoint Organizer)
+  // Membership request actions via secure RPCs
   const handleApproveMember = async (targetMemId: string, studentName: string) => {
     try {
-      const { error } = await supabase
-        .from("club_memberships")
-        .update({ status: "active" })
-        .eq("id", targetMemId);
+      const { error } = await supabase.rpc("approve_club_membership", {
+        p_membership_id: targetMemId,
+      });
 
       if (error) throw error;
       toast.success(`Approved ${studentName}'s membership!`);
@@ -416,10 +415,9 @@ const ClubWorkspace = () => {
 
   const handleRejectMember = async (targetMemId: string, studentName: string) => {
     try {
-      const { error } = await supabase
-        .from("club_memberships")
-        .delete()
-        .eq("id", targetMemId);
+      const { error } = await supabase.rpc("reject_club_membership", {
+        p_membership_id: targetMemId,
+      });
 
       if (error) throw error;
       toast.info(`Rejected ${studentName}'s request.`);
@@ -432,10 +430,9 @@ const ClubWorkspace = () => {
 
   const handlePromoteToOrganizer = async (targetMemId: string, studentName: string) => {
     try {
-      const { error } = await supabase
-        .from("club_memberships")
-        .update({ role: "organizer" })
-        .eq("id", targetMemId);
+      const { error } = await supabase.rpc("appoint_club_organizer", {
+        p_membership_id: targetMemId,
+      });
 
       if (error) throw error;
       toast.success(`${studentName} appointed as Club Organizer!`);

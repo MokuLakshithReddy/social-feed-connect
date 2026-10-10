@@ -7,13 +7,383 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.1"
   }
   public: {
     Tables: {
+      clubs: {
+        Row: {
+          id: string
+          name: string
+          slug: string
+          description: string | null
+          category: string
+          logo_url: string | null
+          cover_url: string | null
+          faculty_coordinator: string | null
+          status: "active" | "pending_approval" | "inactive"
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          slug: string
+          description?: string | null
+          category?: string
+          logo_url?: string | null
+          cover_url?: string | null
+          faculty_coordinator?: string | null
+          status?: "active" | "pending_approval" | "inactive"
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          slug?: string
+          description?: string | null
+          category?: string
+          logo_url?: string | null
+          cover_url?: string | null
+          faculty_coordinator?: string | null
+          status?: "active" | "pending_approval" | "inactive"
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clubs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      club_memberships: {
+        Row: {
+          id: string
+          club_id: string
+          user_id: string
+          role: "president" | "organizer" | "member"
+          status: "active" | "pending" | "rejected" | "banned"
+          joined_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          club_id: string
+          user_id: string
+          role?: "president" | "organizer" | "member"
+          status?: "active" | "pending" | "rejected" | "banned"
+          joined_at?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          club_id?: string
+          user_id?: string
+          role?: "president" | "organizer" | "member"
+          status?: "active" | "pending" | "rejected" | "banned"
+          joined_at?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_memberships_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "club_memberships_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      club_channels: {
+        Row: {
+          id: string
+          club_id: string
+          name: string
+          type: "announcements" | "general" | "project" | "events"
+          description: string | null
+          is_private: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          club_id: string
+          name: string
+          type?: "announcements" | "general" | "project" | "events"
+          description?: string | null
+          is_private?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          club_id?: string
+          name?: string
+          type?: "announcements" | "general" | "project" | "events"
+          description?: string | null
+          is_private?: boolean
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_channels_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      channel_messages: {
+        Row: {
+          id: string
+          channel_id: string
+          sender_id: string
+          content: string
+          attachments: Json | null
+          is_pinned: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          channel_id: string
+          sender_id: string
+          content: string
+          attachments?: Json | null
+          is_pinned?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          channel_id?: string
+          sender_id?: string
+          content?: string
+          attachments?: Json | null
+          is_pinned?: boolean
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_messages_channel_id_fkey"
+            columns: ["channel_id"]
+            isOneToOne: false
+            referencedRelation: "club_channels"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channel_messages_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      events: {
+        Row: {
+          id: string
+          club_id: string
+          title: string
+          description: string | null
+          poster_url: string | null
+          venue: string
+          start_time: string
+          end_time: string | null
+          capacity: number | null
+          is_published: boolean
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          club_id: string
+          title: string
+          description?: string | null
+          poster_url?: string | null
+          venue: string
+          start_time: string
+          end_time?: string | null
+          capacity?: number | null
+          is_published?: boolean
+          created_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          club_id?: string
+          title?: string
+          description?: string | null
+          poster_url?: string | null
+          venue?: string
+          start_time?: string
+          end_time?: string | null
+          capacity?: number | null
+          is_published?: boolean
+          created_by?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "events_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "events_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      event_registrations: {
+        Row: {
+          id: string
+          event_id: string
+          user_id: string
+          status: "registered" | "waitlist" | "attended" | "cancelled"
+          qr_code_token: string
+          checked_in_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          event_id: string
+          user_id: string
+          status?: "registered" | "waitlist" | "attended" | "cancelled"
+          qr_code_token?: string
+          checked_in_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          event_id?: string
+          user_id?: string
+          status?: "registered" | "waitlist" | "attended" | "cancelled"
+          qr_code_token?: string
+          checked_in_at?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_registrations_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_registrations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      notifications: {
+        Row: {
+          id: string
+          user_id: string
+          type: string
+          title: string
+          message: string
+          resource_type: string | null
+          resource_id: string | null
+          is_read: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          type: string
+          title: string
+          message: string
+          resource_type?: string | null
+          resource_id?: string | null
+          is_read?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          type?: string
+          title?: string
+          message?: string
+          resource_type?: string | null
+          resource_id?: string | null
+          is_read?: boolean
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          bio: string | null
+          college_role: "student" | "faculty" | "college_admin"
+          created_at: string
+          department: string | null
+          id: string
+          is_verified: boolean
+          student_id: string | null
+          updated_at: string
+          username: string
+          year: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          bio?: string | null
+          college_role?: "student" | "faculty" | "college_admin"
+          created_at?: string
+          department?: string | null
+          id: string
+          is_verified?: boolean
+          student_id?: string | null
+          updated_at?: string
+          username: string
+          year?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          bio?: string | null
+          college_role?: "student" | "faculty" | "college_admin"
+          created_at?: string
+          department?: string | null
+          id?: string
+          is_verified?: boolean
+          student_id?: string | null
+          updated_at?: string
+          username?: string
+          year?: string | null
+        }
+        Relationships: []
+      }
       comments: {
         Row: {
           content: string
@@ -50,7 +420,7 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
-          },
+          }
         ]
       }
       conversations: {
@@ -75,7 +445,22 @@ export type Database = {
           user1_id?: string
           user2_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "conversations_user1_id_fkey"
+            columns: ["user1_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_user2_id_fkey"
+            columns: ["user2_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       followers: {
         Row: {
@@ -110,7 +495,7 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
-          },
+          }
         ]
       }
       likes: {
@@ -146,7 +531,7 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
-          },
+          }
         ]
       }
       messages: {
@@ -155,6 +540,7 @@ export type Database = {
           conversation_id: string
           created_at: string
           id: string
+          read: boolean
           sender_id: string
         }
         Insert: {
@@ -162,6 +548,7 @@ export type Database = {
           conversation_id: string
           created_at?: string
           id?: string
+          read?: boolean
           sender_id: string
         }
         Update: {
@@ -169,6 +556,7 @@ export type Database = {
           conversation_id?: string
           created_at?: string
           id?: string
+          read?: boolean
           sender_id?: string
         }
         Relationships: [
@@ -179,6 +567,13 @@ export type Database = {
             referencedRelation: "conversations"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "messages_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
         ]
       }
       posts: {
@@ -210,42 +605,58 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
-          },
+          }
         ]
-      }
-      profiles: {
-        Row: {
-          avatar_url: string | null
-          bio: string | null
-          created_at: string
-          id: string
-          updated_at: string
-          username: string
-        }
-        Insert: {
-          avatar_url?: string | null
-          bio?: string | null
-          created_at?: string
-          id: string
-          updated_at?: string
-          username: string
-        }
-        Update: {
-          avatar_url?: string | null
-          bio?: string | null
-          created_at?: string
-          id?: string
-          updated_at?: string
-          username?: string
-        }
-        Relationships: []
       }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      register_for_event: {
+        Args: {
+          p_event_id: string
+        }
+        Returns: Json
+      }
+      cancel_event_registration: {
+        Args: {
+          p_event_id: string
+        }
+        Returns: Json
+      }
+      check_in_event_attendee: {
+        Args: {
+          p_event_id: string
+          p_qr_token: string
+        }
+        Returns: Json
+      }
+      approve_club_membership: {
+        Args: {
+          p_membership_id: string
+        }
+        Returns: Json
+      }
+      reject_club_membership: {
+        Args: {
+          p_membership_id: string
+        }
+        Returns: Json
+      }
+      appoint_club_organizer: {
+        Args: {
+          p_membership_id: string
+        }
+        Returns: Json
+      }
+      verify_student_account: {
+        Args: {
+          p_user_id: string
+          p_is_verified: boolean
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
@@ -338,43 +749,3 @@ export type TablesUpdate<
       ? U
       : never
     : never
-
-export type Enums<
-  DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
-> = DefaultSchemaEnumNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
-  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
-    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
-    : never
-
-export type CompositeTypes<
-  PublicCompositeTypeNameOrOptions extends
-    | keyof DefaultSchema["CompositeTypes"]
-    | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
-> = PublicCompositeTypeNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
-  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
-    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
-    : never
-
-export const Constants = {
-  public: {
-    Enums: {},
-  },
-} as const

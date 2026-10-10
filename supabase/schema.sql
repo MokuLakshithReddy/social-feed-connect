@@ -1,139 +1,364 @@
--- Complete Supabase Schema for Social Feed Connect
+-- ============================================================================
+-- CAMPUSCONNECT: CONSOLIDATED MASTER DATABASE SCHEMA & SECURITY ENGINE
+-- Single Source of Truth for Database Schema, RLS, Triggers, and Stored Procedures
+-- ============================================================================
 
--- 1. Profiles table
+-- 1. BASE EXTENSIONS
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- 2. PUBLIC PROFILES
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  username TEXT UNIQUE NOT NULL,
-  bio TEXT DEFAULT '',
-  avatar_url TEXT DEFAULT '',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  username TEXT NOT NULL UNIQUE,
+  bio TEXT,
+  avatar_url TEXT,
+  department TEXT,
+  year TEXT,
+  student_id TEXT,
+  college_role TEXT NOT NULL DEFAULT 'student' CHECK (college_role IN ('student', 'faculty', 'college_admin')),
+  is_verified BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'profiles' AND policyname = 'Anyone can view profiles') THEN
-    CREATE POLICY "Anyone can view profiles" ON public.profiles FOR SELECT USING (true);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'profiles' AND policyname = 'Users can insert own profile') THEN
-    CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'profiles' AND policyname = 'Users can update own profile') THEN
-    CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
-  END IF;
-END $$;
-
--- 2. Posts table
-CREATE TABLE IF NOT EXISTS public.posts (
+-- 3. CLUBS TABLE
+CREATE TABLE IF NOT EXISTS public.clubs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  image_url TEXT NOT NULL,
-  caption TEXT DEFAULT '',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  name TEXT NOT NULL UNIQUE,
+  slug TEXT NOT NULL UNIQUE,
+  description TEXT,
+  category TEXT NOT NULL DEFAULT 'Technical',
+  logo_url TEXT,
+  cover_url TEXT,
+  faculty_coordinator TEXT,
+  status TEXT NOT NULL DEFAULT 'pending_approval' CHECK (status IN ('active', 'pending_approval', 'inactive')),
+  created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
-
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'posts' AND policyname = 'Anyone can view posts') THEN
-    CREATE POLICY "Anyone can view posts" ON public.posts FOR SELECT USING (true);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'posts' AND policyname = 'Auth users can create posts') THEN
-    CREATE POLICY "Auth users can create posts" ON public.posts FOR INSERT WITH CHECK (auth.uid() = user_id);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'posts' AND policyname = 'Users can update own posts') THEN
-    CREATE POLICY "Users can update own posts" ON public.posts FOR UPDATE USING (auth.uid() = user_id);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'posts' AND policyname = 'Users can delete own posts') THEN
-    CREATE POLICY "Users can delete own posts" ON public.posts FOR DELETE USING (auth.uid() = user_id);
-  END IF;
-END $$;
-
--- 3. Likes table
-CREATE TABLE IF NOT EXISTS public.likes (
+-- 4. CLUB MEMBERSHIPS TABLE
+CREATE TABLE IF NOT EXISTS public.club_memberships (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  club_id UUID NOT NULL REFERENCES public.clubs(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  post_id UUID NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(user_id, post_id)
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('president', 'organizer', 'member')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('active', 'pending', 'rejected', 'banned')),
+  joined_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (club_id, user_id)
 );
 
-ALTER TABLE public.likes ENABLE ROW LEVEL SECURITY;
-
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'likes' AND policyname = 'Anyone can view likes') THEN
-    CREATE POLICY "Anyone can view likes" ON public.likes FOR SELECT USING (true);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'likes' AND policyname = 'Auth users can like') THEN
-    CREATE POLICY "Auth users can like" ON public.likes FOR INSERT WITH CHECK (auth.uid() = user_id);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'likes' AND policyname = 'Users can unlike') THEN
-    CREATE POLICY "Users can unlike" ON public.likes FOR DELETE USING (auth.uid() = user_id);
-  END IF;
-END $$;
-
--- 4. Comments table
-CREATE TABLE IF NOT EXISTS public.comments (
+-- 5. CLUB CHANNELS TABLE
+CREATE TABLE IF NOT EXISTS public.club_channels (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  post_id UUID NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
+  club_id UUID NOT NULL REFERENCES public.clubs(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'general' CHECK (type IN ('announcements', 'general', 'project', 'events')),
+  description TEXT,
+  is_private BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 6. CHANNEL MESSAGES TABLE
+CREATE TABLE IF NOT EXISTS public.channel_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  channel_id UUID NOT NULL REFERENCES public.club_channels(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  attachments JSONB DEFAULT '[]'::jsonb,
+  is_pinned BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 
-ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
-
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'comments' AND policyname = 'Anyone can view comments') THEN
-    CREATE POLICY "Anyone can view comments" ON public.comments FOR SELECT USING (true);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'comments' AND policyname = 'Auth users can comment') THEN
-    CREATE POLICY "Auth users can comment" ON public.comments FOR INSERT WITH CHECK (auth.uid() = user_id);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'comments' AND policyname = 'Users can delete own comments') THEN
-    CREATE POLICY "Users can delete own comments" ON public.comments FOR DELETE USING (auth.uid() = user_id);
-  END IF;
-END $$;
-
--- 5. Followers table
-CREATE TABLE IF NOT EXISTS public.followers (
+-- 7. EVENTS TABLE
+CREATE TABLE IF NOT EXISTS public.events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  follower_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  following_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(follower_id, following_id),
-  CHECK (follower_id != following_id)
+  club_id UUID NOT NULL REFERENCES public.clubs(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT,
+  poster_url TEXT,
+  venue TEXT NOT NULL,
+  start_time TIMESTAMPTZ NOT NULL,
+  end_time TIMESTAMPTZ,
+  capacity INTEGER CHECK (capacity IS NULL OR capacity > 0),
+  is_published BOOLEAN NOT NULL DEFAULT true,
+  created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 
-ALTER TABLE public.followers ENABLE ROW LEVEL SECURITY;
+-- 8. EVENT REGISTRATIONS TABLE
+CREATE TABLE IF NOT EXISTS public.event_registrations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id UUID NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'registered' CHECK (status IN ('registered', 'waitlist', 'attended', 'cancelled')),
+  qr_code_token TEXT UNIQUE DEFAULT gen_random_uuid()::text,
+  checked_in_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (event_id, user_id)
+);
 
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'followers' AND policyname = 'Anyone can view followers') THEN
-    CREATE POLICY "Anyone can view followers" ON public.followers FOR SELECT USING (true);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'followers' AND policyname = 'Auth users can follow') THEN
-    CREATE POLICY "Auth users can follow" ON public.followers FOR INSERT WITH CHECK (auth.uid() = follower_id);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'followers' AND policyname = 'Users can unfollow') THEN
-    CREATE POLICY "Users can unfollow" ON public.followers FOR DELETE USING (auth.uid() = follower_id);
-  END IF;
-END $$;
+-- 9. NOTIFICATIONS TABLE
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('announcement', 'event_created', 'event_reminder', 'membership_requested', 'membership_approved')),
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  resource_type TEXT,
+  resource_id TEXT,
+  is_read BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
 
--- 6. Trigger for profile auto-creation on signup
+-- ============================================================================
+-- CRITICAL SECURITY TRIGGERS (DATABASE LEVEL INTEGRITY)
+-- ============================================================================
+
+-- 1. PROTECT PROFILE PRIVILEGES (Anti-Escalation)
+CREATE OR REPLACE FUNCTION public.protect_profile_privileges()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_caller_role TEXT;
+BEGIN
+  -- Allow direct migration/database administration session where auth.uid() is null
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- If modifying college_role or is_verified:
+  IF (OLD.college_role IS DISTINCT FROM NEW.college_role OR OLD.is_verified IS DISTINCT FROM NEW.is_verified) THEN
+    SELECT college_role INTO v_caller_role FROM public.profiles WHERE id = auth.uid();
+
+    IF v_caller_role IS DISTINCT FROM 'college_admin' THEN
+      -- Silently reset privilege columns to existing values
+      NEW.college_role := OLD.college_role;
+      NEW.is_verified := OLD.is_verified;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_protect_profile_privileges ON public.profiles;
+CREATE TRIGGER trg_protect_profile_privileges
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.protect_profile_privileges();
+
+-- 2. ENFORCE CLUB APPROVAL RULES (Anti-Tampering)
+CREATE OR REPLACE FUNCTION public.enforce_club_approval_rules()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_caller_role TEXT;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT college_role INTO v_caller_role FROM public.profiles WHERE id = auth.uid();
+
+  IF TG_OP = 'INSERT' THEN
+    NEW.created_by := auth.uid();
+    -- Non-admins CANNOT create active clubs directly
+    IF v_caller_role IS DISTINCT FROM 'college_admin' THEN
+      NEW.status := 'pending_approval';
+    END IF;
+  ELSIF TG_OP = 'UPDATE' THEN
+    -- Non-admins CANNOT approve clubs or alter approval status
+    IF (OLD.status IS DISTINCT FROM NEW.status) THEN
+      IF v_caller_role IS DISTINCT FROM 'college_admin' THEN
+        NEW.status := OLD.status;
+      END IF;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_enforce_club_approval_rules ON public.clubs;
+CREATE TRIGGER trg_enforce_club_approval_rules
+  BEFORE INSERT OR UPDATE ON public.clubs
+  FOR EACH ROW
+  EXECUTE FUNCTION public.enforce_club_approval_rules();
+
+-- 3. ENFORCE MEMBERSHIP STATE MACHINE (Anti-Self-Promotion)
+CREATE OR REPLACE FUNCTION public.enforce_membership_state_machine()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_caller_role TEXT;
+  v_caller_club_role TEXT;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT college_role INTO v_caller_role FROM public.profiles WHERE id = auth.uid();
+
+  IF TG_OP = 'INSERT' THEN
+    -- If non-admin, force defaults: role = member, status = pending
+    IF v_caller_role IS DISTINCT FROM 'college_admin' THEN
+      NEW.user_id := auth.uid();
+      NEW.role := 'member';
+      NEW.status := 'pending';
+    END IF;
+  ELSIF TG_OP = 'UPDATE' THEN
+    -- If non-admin, verify allowed transitions
+    IF v_caller_role IS DISTINCT FROM 'college_admin' THEN
+      SELECT role INTO v_caller_club_role
+      FROM public.club_memberships
+      WHERE club_id = OLD.club_id AND user_id = auth.uid() AND status = 'active';
+
+      -- Student cannot modify their own status or role
+      IF auth.uid() = OLD.user_id AND (OLD.role IS DISTINCT FROM NEW.role OR OLD.status IS DISTINCT FROM NEW.status) THEN
+        IF v_caller_club_role IS DISTINCT FROM 'president' THEN
+          RAISE EXCEPTION 'Students cannot approve their own membership or elevate their own roles';
+        END IF;
+      END IF;
+
+      -- Changing role to organizer requires president
+      IF OLD.role IS DISTINCT FROM NEW.role THEN
+        IF v_caller_club_role IS DISTINCT FROM 'president' THEN
+          RAISE EXCEPTION 'Only the club president can assign organizer roles';
+        END IF;
+        IF NEW.role = 'president' THEN
+          RAISE EXCEPTION 'President role cannot be assigned through standard updates';
+        END IF;
+      END IF;
+
+      -- Approving membership requires organizer or president
+      IF OLD.status IS DISTINCT FROM NEW.status THEN
+        IF v_caller_club_role NOT IN ('president', 'organizer') THEN
+          RAISE EXCEPTION 'Only club organizers can approve or reject membership requests';
+        END IF;
+      END IF;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_enforce_membership_state_machine ON public.club_memberships;
+CREATE TRIGGER trg_enforce_membership_state_machine
+  BEFORE INSERT OR UPDATE ON public.club_memberships
+  FOR EACH ROW
+  EXECUTE FUNCTION public.enforce_membership_state_machine();
+
+-- 4. AUTO-NOTIFICATIONS TRIGGERS
+CREATE OR REPLACE FUNCTION public.handle_membership_notifications()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_club_name TEXT;
+  v_user_name TEXT;
+  v_organizer RECORD;
+BEGIN
+  SELECT name INTO v_club_name FROM public.clubs WHERE id = NEW.club_id;
+  SELECT username INTO v_user_name FROM public.profiles WHERE id = NEW.user_id;
+
+  -- On INSERT with status 'pending': Notify club organizers/presidents
+  IF (TG_OP = 'INSERT' AND NEW.status = 'pending') THEN
+    FOR v_organizer IN 
+      SELECT user_id FROM public.club_memberships 
+      WHERE club_id = NEW.club_id AND role IN ('president', 'organizer') AND status = 'active'
+    LOOP
+      INSERT INTO public.notifications (user_id, type, title, message, resource_type, resource_id)
+      VALUES (
+        v_organizer.user_id,
+        'membership_requested',
+        'New Club Membership Request',
+        v_user_name || ' requested to join ' || v_club_name,
+        'club',
+        NEW.club_id::text
+      );
+    END LOOP;
+  END IF;
+
+  -- On UPDATE from 'pending' to 'active': Notify student
+  IF (TG_OP = 'UPDATE' AND OLD.status = 'pending' AND NEW.status = 'active') THEN
+    INSERT INTO public.notifications (user_id, type, title, message, resource_type, resource_id)
+    VALUES (
+      NEW.user_id,
+      'membership_approved',
+      'Membership Approved! 🎉',
+      'You are now an active member of ' || v_club_name,
+      'club',
+      NEW.club_id::text
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_handle_membership_notifications ON public.club_memberships;
+CREATE TRIGGER trg_handle_membership_notifications
+  AFTER INSERT OR UPDATE ON public.club_memberships
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_membership_notifications();
+
+-- 5. ANNOUNCEMENTS BROADCAST TRIGGER
+CREATE OR REPLACE FUNCTION public.handle_announcement_broadcast()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_ch_type TEXT;
+  v_club_id UUID;
+  v_club_name TEXT;
+  v_member RECORD;
+BEGIN
+  SELECT type, club_id INTO v_ch_type, v_club_id
+  FROM public.club_channels
+  WHERE id = NEW.channel_id;
+
+  IF v_ch_type = 'announcements' THEN
+    SELECT name INTO v_club_name FROM public.clubs WHERE id = v_club_id;
+
+    FOR v_member IN
+      SELECT user_id FROM public.club_memberships
+      WHERE club_id = v_club_id AND status = 'active' AND user_id != NEW.sender_id
+    LOOP
+      INSERT INTO public.notifications (user_id, type, title, message, resource_type, resource_id)
+      VALUES (
+        v_member.user_id,
+        'announcement',
+        'Notice from ' || v_club_name,
+        SUBSTRING(NEW.content FROM 1 FOR 120),
+        'club',
+        v_club_id::text
+      );
+    END LOOP;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_handle_announcement_broadcast ON public.channel_messages;
+CREATE TRIGGER trg_handle_announcement_broadcast
+  AFTER INSERT ON public.channel_messages
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_announcement_broadcast();
+
+-- 6. COLLEGE USER ONBOARDING & VERIFICATION TRIGGER
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
+RETURNS TRIGGER AS $$
 DECLARE
   base_username TEXT;
   final_username TEXT;
+  dept TEXT;
+  yr TEXT;
+  s_id TEXT;
+  user_email TEXT;
+  is_edu_domain BOOLEAN := false;
 BEGIN
-  base_username := TRIM(COALESCE(NEW.raw_user_meta_data->>'username', 'user_' || LEFT(NEW.id::text, 8)));
+  user_email := LOWER(COALESCE(NEW.email, ''));
+  base_username := TRIM(COALESCE(NEW.raw_user_meta_data->>'username', 'student_' || LEFT(NEW.id::text, 6)));
   IF base_username = '' THEN
-    base_username := 'user_' || LEFT(NEW.id::text, 8);
+    base_username := 'student_' || LEFT(NEW.id::text, 6);
   END IF;
 
   final_username := base_username;
@@ -141,13 +366,34 @@ BEGIN
     final_username := base_username || '_' || LEFT(NEW.id::text, 4);
   END IF;
 
-  INSERT INTO public.profiles (id, username)
-  VALUES (NEW.id, final_username)
-  ON CONFLICT (id) DO NOTHING;
+  dept := NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'department', '')), '');
+  yr := NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'year', '')), '');
+  s_id := NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'student_id', '')), '');
+
+  -- Verification: Check for institutional .edu or college email domain
+  IF user_email LIKE '%.edu' OR user_email LIKE '%college%' OR user_email LIKE '%campus%' OR user_email LIKE '%univ%' THEN
+    is_edu_domain := true;
+  END IF;
+
+  INSERT INTO public.profiles (id, username, department, year, student_id, college_role, is_verified)
+  VALUES (
+    NEW.id,
+    final_username,
+    COALESCE(dept, 'Computer Science & Engineering'),
+    COALESCE(yr, '1st Year'),
+    s_id,
+    'student',
+    is_edu_domain
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    username = EXCLUDED.username,
+    department = COALESCE(public.profiles.department, EXCLUDED.department),
+    year = COALESCE(public.profiles.year, EXCLUDED.year),
+    student_id = COALESCE(public.profiles.student_id, EXCLUDED.student_id);
 
   RETURN NEW;
 END;
-$$;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
@@ -155,254 +401,540 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
 
--- Backfill any existing auth users who registered before the trigger existed
+-- ============================================================================
+-- STORED PROCEDURES / SECURE RPCs
+-- ============================================================================
+
+-- MEMBERSHIP APPROVAL RPC
+CREATE OR REPLACE FUNCTION public.approve_club_membership(p_membership_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+  v_caller_id UUID := auth.uid();
+  v_mem RECORD;
+  v_is_authorized BOOLEAN;
+BEGIN
+  SELECT * INTO v_mem FROM public.club_memberships WHERE id = p_membership_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Membership record not found';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.club_memberships
+    WHERE club_id = v_mem.club_id AND user_id = v_caller_id AND role IN ('president', 'organizer') AND status = 'active'
+    UNION
+    SELECT 1 FROM public.profiles
+    WHERE id = v_caller_id AND college_role = 'college_admin'
+  ) INTO v_is_authorized;
+
+  IF NOT v_is_authorized THEN
+    RAISE EXCEPTION 'Unauthorized: Only club organizers or college administrators can approve memberships';
+  END IF;
+
+  UPDATE public.club_memberships
+  SET status = 'active'
+  WHERE id = p_membership_id;
+
+  RETURN jsonb_build_object('success', true, 'membership_id', p_membership_id, 'status', 'active');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- MEMBERSHIP REJECTION RPC
+CREATE OR REPLACE FUNCTION public.reject_club_membership(p_membership_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+  v_caller_id UUID := auth.uid();
+  v_mem RECORD;
+  v_is_authorized BOOLEAN;
+BEGIN
+  SELECT * INTO v_mem FROM public.club_memberships WHERE id = p_membership_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Membership record not found';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.club_memberships
+    WHERE club_id = v_mem.club_id AND user_id = v_caller_id AND role IN ('president', 'organizer') AND status = 'active'
+    UNION
+    SELECT 1 FROM public.profiles
+    WHERE id = v_caller_id AND college_role = 'college_admin'
+  ) INTO v_is_authorized;
+
+  IF NOT v_is_authorized THEN
+    RAISE EXCEPTION 'Unauthorized: Only club organizers or college administrators can reject memberships';
+  END IF;
+
+  DELETE FROM public.club_memberships WHERE id = p_membership_id;
+
+  RETURN jsonb_build_object('success', true, 'membership_id', p_membership_id, 'status', 'rejected');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- APPOINT ORGANIZER RPC
+CREATE OR REPLACE FUNCTION public.appoint_club_organizer(p_membership_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+  v_caller_id UUID := auth.uid();
+  v_mem RECORD;
+  v_is_authorized BOOLEAN;
+BEGIN
+  SELECT * INTO v_mem FROM public.club_memberships WHERE id = p_membership_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Membership record not found';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.club_memberships
+    WHERE club_id = v_mem.club_id AND user_id = v_caller_id AND role = 'president' AND status = 'active'
+    UNION
+    SELECT 1 FROM public.profiles
+    WHERE id = v_caller_id AND college_role = 'college_admin'
+  ) INTO v_is_authorized;
+
+  IF NOT v_is_authorized THEN
+    RAISE EXCEPTION 'Unauthorized: Only the club president or college administrator can appoint organizers';
+  END IF;
+
+  UPDATE public.club_memberships
+  SET role = 'organizer'
+  WHERE id = p_membership_id;
+
+  RETURN jsonb_build_object('success', true, 'membership_id', p_membership_id, 'role', 'organizer');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 1. ATOMIC EVENT REGISTRATION
+CREATE OR REPLACE FUNCTION public.register_for_event(p_event_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+  v_user_id UUID := auth.uid();
+  v_event RECORD;
+  v_current_count INT;
+  v_existing_reg RECORD;
+  v_new_reg RECORD;
+BEGIN
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Authentication required to register for events';
+  END IF;
+
+  -- Lock event row to prevent concurrent race conditions
+  SELECT id, club_id, title, capacity, is_published, start_time
+  INTO v_event
+  FROM public.events
+  WHERE id = p_event_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Event not found';
+  END IF;
+
+  IF NOT v_event.is_published THEN
+    RAISE EXCEPTION 'Event is not published';
+  END IF;
+
+  IF v_event.start_time < NOW() THEN
+    RAISE EXCEPTION 'Cannot register for past events';
+  END IF;
+
+  -- Check existing registration
+  SELECT id, status INTO v_existing_reg
+  FROM public.event_registrations
+  WHERE event_id = p_event_id AND user_id = v_user_id;
+
+  IF FOUND THEN
+    IF v_existing_reg.status = 'registered' THEN
+      RAISE EXCEPTION 'Already registered for this event';
+    ELSIF v_existing_reg.status = 'cancelled' THEN
+      UPDATE public.event_registrations
+      SET status = 'registered', checked_in_at = NULL
+      WHERE id = v_existing_reg.id
+      RETURNING * INTO v_new_reg;
+
+      RETURN jsonb_build_object('success', true, 'registration_id', v_new_reg.id, 'qr_code_token', v_new_reg.qr_code_token);
+    END IF;
+  END IF;
+
+  -- Verify capacity atomically
+  IF v_event.capacity IS NOT NULL THEN
+    SELECT COUNT(*) INTO v_current_count
+    FROM public.event_registrations
+    WHERE event_id = p_event_id AND status = 'registered';
+
+    IF v_current_count >= v_event.capacity THEN
+      RAISE EXCEPTION 'Event has reached maximum capacity (% seats)', v_event.capacity;
+    END IF;
+  END IF;
+
+  INSERT INTO public.event_registrations (event_id, user_id, status)
+  VALUES (p_event_id, v_user_id, 'registered')
+  RETURNING * INTO v_new_reg;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'registration_id', v_new_reg.id,
+    'qr_code_token', v_new_reg.qr_code_token
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 2. CONTROLLED CANCELLATION
+CREATE OR REPLACE FUNCTION public.cancel_event_registration(p_event_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+  v_user_id UUID := auth.uid();
+BEGIN
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Authentication required';
+  END IF;
+
+  DELETE FROM public.event_registrations
+  WHERE event_id = p_event_id AND user_id = v_user_id;
+
+  RETURN jsonb_build_object('success', true, 'message', 'Registration cancelled successfully');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3. SERVER-VALIDATED ATTENDANCE CHECK-IN
+CREATE OR REPLACE FUNCTION public.check_in_event_attendee(p_event_id UUID, p_qr_token TEXT)
+RETURNS JSONB AS $$
+DECLARE
+  v_caller_id UUID := auth.uid();
+  v_event RECORD;
+  v_is_authorized BOOLEAN;
+  v_reg RECORD;
+  v_attendee_name TEXT;
+BEGIN
+  SELECT ev.id, ev.club_id, ev.title INTO v_event
+  FROM public.events ev
+  WHERE ev.id = p_event_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Event not found';
+  END IF;
+
+  -- Verify caller is organizer or admin
+  SELECT EXISTS (
+    SELECT 1 FROM public.club_memberships
+    WHERE club_id = v_event.club_id AND user_id = v_caller_id AND role IN ('president', 'organizer') AND status = 'active'
+    UNION
+    SELECT 1 FROM public.profiles
+    WHERE id = v_caller_id AND college_role = 'college_admin'
+  ) INTO v_is_authorized;
+
+  IF NOT v_is_authorized THEN
+    RAISE EXCEPTION 'Unauthorized: Only event organizers can scan tickets';
+  END IF;
+
+  SELECT * INTO v_reg
+  FROM public.event_registrations
+  WHERE event_id = p_event_id AND qr_code_token = p_qr_token;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Invalid ticket pass or QR code';
+  END IF;
+
+  IF v_reg.status = 'cancelled' THEN
+    RAISE EXCEPTION 'This registration was cancelled';
+  END IF;
+
+  IF v_reg.checked_in_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Attendee already checked in at %', v_reg.checked_in_at;
+  END IF;
+
+  UPDATE public.event_registrations
+  SET checked_in_at = NOW(), status = 'attended'
+  WHERE id = v_reg.id;
+
+  SELECT username INTO v_attendee_name FROM public.profiles WHERE id = v_reg.user_id;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'attendee_name', v_attendee_name,
+    'checked_in_at', NOW()
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 4. VERIFY STUDENT ACCOUNT (Admin Only)
+CREATE OR REPLACE FUNCTION public.verify_student_account(p_user_id UUID, p_is_verified BOOLEAN)
+RETURNS JSONB AS $$
+DECLARE
+  v_caller_id UUID := auth.uid();
+  v_is_admin BOOLEAN;
+BEGIN
+  SELECT (college_role = 'college_admin') INTO v_is_admin
+  FROM public.profiles WHERE id = v_caller_id;
+
+  IF NOT v_is_admin THEN
+    RAISE EXCEPTION 'Unauthorized: Only college administrators can verify accounts';
+  END IF;
+
+  UPDATE public.profiles
+  SET is_verified = p_is_verified, updated_at = NOW()
+  WHERE id = p_user_id;
+
+  RETURN jsonb_build_object('success', true, 'user_id', p_user_id, 'is_verified', p_is_verified);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================================
+-- STRICT ROW LEVEL SECURITY (RLS) POLICIES
+-- ============================================================================
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.clubs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.club_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.club_channels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.channel_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.event_registrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+-- Clean existing policies to ensure zero permissive leakage
 DO $$
 DECLARE
-  u RECORD;
-  base_u TEXT;
-  final_u TEXT;
+  r RECORD;
 BEGIN
-  FOR u IN SELECT id, raw_user_meta_data FROM auth.users ORDER BY created_at ASC LOOP
-    base_u := TRIM(COALESCE(u.raw_user_meta_data->>'username', 'user_' || LEFT(u.id::text, 8)));
-    IF base_u = '' THEN
-      base_u := 'user_' || LEFT(u.id::text, 8);
-    END IF;
-
-    final_u := base_u;
-    IF EXISTS (SELECT 1 FROM public.profiles WHERE username = final_u AND id != u.id) THEN
-      final_u := base_u || '_' || LEFT(u.id::text, 4);
-    END IF;
-
-    INSERT INTO public.profiles (id, username)
-    VALUES (u.id, final_u)
-    ON CONFLICT (id) DO NOTHING;
+  FOR r IN (
+    SELECT schemaname, tablename, policyname
+    FROM pg_policies
+    WHERE schemaname = 'public' AND tablename IN (
+      'clubs', 'club_memberships', 'club_channels', 'channel_messages',
+      'events', 'event_registrations', 'notifications', 'profiles'
+    )
+  ) LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I', r.policyname, r.schemaname, r.tablename);
   END LOOP;
 END $$;
 
--- 7. Updated_at trigger
-CREATE OR REPLACE FUNCTION public.update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = now();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SET search_path = public;
+-- PROFILES POLICIES
+CREATE POLICY "Anyone can view profiles" ON public.profiles
+  FOR SELECT TO authenticated
+  USING (true);
 
-DROP TRIGGER IF EXISTS update_profiles_updated_at ON public.profiles;
-CREATE TRIGGER update_profiles_updated_at
-  BEFORE UPDATE ON public.profiles
-  FOR EACH ROW
-  EXECUTE FUNCTION public.update_updated_at_column();
+CREATE POLICY "Users can insert own profile" ON public.profiles
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = id);
 
--- 8. Storage buckets (posts and avatars)
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('avatars', 'avatars', true), ('posts', 'posts', true)
-ON CONFLICT (id) DO UPDATE SET public = true;
+CREATE POLICY "Users can update own profile" ON public.profiles
+  FOR UPDATE TO authenticated
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
 
--- Storage policies
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Avatar images are publicly accessible') THEN
-    CREATE POLICY "Avatar images are publicly accessible" ON storage.objects FOR SELECT USING (bucket_id = 'avatars');
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Users can upload avatars') THEN
-    CREATE POLICY "Users can upload avatars" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'avatars' AND auth.uid()::text = (storage.foldername(name))[1]);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Users can update avatars') THEN
-    CREATE POLICY "Users can update avatars" ON storage.objects FOR UPDATE USING (bucket_id = 'avatars' AND auth.uid()::text = (storage.foldername(name))[1]);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Users can delete avatars') THEN
-    CREATE POLICY "Users can delete avatars" ON storage.objects FOR DELETE USING (bucket_id = 'avatars' AND auth.uid()::text = (storage.foldername(name))[1]);
-  END IF;
+-- CLUBS POLICIES
+CREATE POLICY "View active clubs or own pending clubs" ON public.clubs
+  FOR SELECT TO authenticated
+  USING (
+    status = 'active' OR
+    created_by = auth.uid() OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Post images are publicly accessible') THEN
-    CREATE POLICY "Post images are publicly accessible" ON storage.objects FOR SELECT USING (bucket_id = 'posts');
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Users can upload post images') THEN
-    CREATE POLICY "Users can upload post images" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'posts' AND auth.uid()::text = (storage.foldername(name))[1]);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Users can delete post images') THEN
-    CREATE POLICY "Users can delete post images" ON storage.objects FOR DELETE USING (bucket_id = 'posts' AND auth.uid()::text = (storage.foldername(name))[1]);
-  END IF;
-END $$;
+CREATE POLICY "Propose clubs" ON public.clubs
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() = created_by
+  );
 
--- 9. Conversations and Messages tables
-CREATE TABLE IF NOT EXISTS public.conversations (
-  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-  user1_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  user2_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  last_message_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-  CHECK (user1_id != user2_id)
-);
+CREATE POLICY "Admins or presidents update clubs" ON public.clubs
+  FOR UPDATE TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.club_memberships
+      WHERE club_id = clubs.id AND user_id = auth.uid() AND role = 'president' AND status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
--- Ensure order-independent unique conversation pair between two users
-CREATE UNIQUE INDEX IF NOT EXISTS unique_conversation_pair
-  ON public.conversations (LEAST(user1_id, user2_id), GREATEST(user1_id, user2_id));
+-- CLUB MEMBERSHIPS POLICIES
+CREATE POLICY "View active memberships or own request" ON public.club_memberships
+  FOR SELECT TO authenticated
+  USING (
+    status = 'active' OR
+    user_id = auth.uid() OR
+    EXISTS (
+      SELECT 1 FROM public.club_memberships cm
+      WHERE cm.club_id = club_memberships.club_id AND cm.user_id = auth.uid() AND cm.role IN ('president', 'organizer') AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
-CREATE TABLE IF NOT EXISTS public.messages (
-  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-  conversation_id UUID NOT NULL REFERENCES public.conversations(id) ON DELETE CASCADE,
-  sender_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  content TEXT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
-);
+CREATE POLICY "Request club membership" ON public.club_memberships
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+  );
 
-ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Organizers or admins update membership" ON public.club_memberships
+  FOR UPDATE TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.club_memberships cm
+      WHERE cm.club_id = club_memberships.club_id AND cm.user_id = auth.uid() AND cm.role IN ('president', 'organizer') AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'conversations' AND policyname = 'Users can view own conversations') THEN
-    CREATE POLICY "Users can view own conversations"
-      ON public.conversations FOR SELECT
-      USING (auth.uid() = user1_id OR auth.uid() = user2_id);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'conversations' AND policyname = 'Auth users can create conversations') THEN
-    CREATE POLICY "Auth users can create conversations"
-      ON public.conversations FOR INSERT
-      WITH CHECK (auth.uid() = user1_id OR auth.uid() = user2_id);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'conversations' AND policyname = 'Users can update own conversations') THEN
-    CREATE POLICY "Users can update own conversations"
-      ON public.conversations FOR UPDATE
-      USING (auth.uid() = user1_id OR auth.uid() = user2_id);
-  END IF;
+CREATE POLICY "Leave club or remove membership" ON public.club_memberships
+  FOR DELETE TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (
+      SELECT 1 FROM public.club_memberships cm
+      WHERE cm.club_id = club_memberships.club_id AND cm.user_id = auth.uid() AND cm.role IN ('president', 'organizer') AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'messages' AND policyname = 'Users can view messages in their conversations') THEN
-    CREATE POLICY "Users can view messages in their conversations"
-      ON public.messages FOR SELECT
-      USING (
+-- CLUB CHANNELS POLICIES
+CREATE POLICY "Active members view channels" ON public.club_channels
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.club_memberships cm
+      WHERE cm.club_id = club_channels.club_id AND cm.user_id = auth.uid() AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
+
+CREATE POLICY "Organizers create channels" ON public.club_channels
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.club_memberships cm
+      WHERE cm.club_id = club_channels.club_id AND cm.user_id = auth.uid() AND cm.role IN ('president', 'organizer') AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
+
+-- CHANNEL MESSAGES POLICIES
+CREATE POLICY "Active members view channel messages" ON public.channel_messages
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.club_channels cc
+      JOIN public.club_memberships cm ON cc.club_id = cm.club_id
+      WHERE cc.id = channel_messages.channel_id AND cm.user_id = auth.uid() AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
+
+CREATE POLICY "Authorized members post messages" ON public.channel_messages
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() = sender_id AND (
+      (
         EXISTS (
-          SELECT 1 FROM public.conversations c
-          WHERE c.id = conversation_id
-          AND (c.user1_id = auth.uid() OR c.user2_id = auth.uid())
+          SELECT 1 FROM public.club_channels cc
+          JOIN public.club_memberships cm ON cc.club_id = cm.club_id
+          WHERE cc.id = channel_messages.channel_id
+            AND cm.user_id = auth.uid()
+            AND cc.type = 'announcements'
+            AND cm.role IN ('president', 'organizer')
+            AND cm.status = 'active'
         )
-      );
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'messages' AND policyname = 'Users can send messages in their conversations') THEN
-    CREATE POLICY "Users can send messages in their conversations"
-      ON public.messages FOR INSERT
-      WITH CHECK (
-        auth.uid() = sender_id AND
+      )
+      OR
+      (
         EXISTS (
-          SELECT 1 FROM public.conversations c
-          WHERE c.id = conversation_id
-          AND (c.user1_id = auth.uid() OR c.user2_id = auth.uid())
+          SELECT 1 FROM public.club_channels cc
+          JOIN public.club_memberships cm ON cc.club_id = cm.club_id
+          WHERE cc.id = channel_messages.channel_id
+            AND cm.user_id = auth.uid()
+            AND cc.type != 'announcements'
+            AND cm.status = 'active'
         )
-      );
-  END IF;
-END $$;
+      )
+      OR
+      EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+    )
+  );
 
-CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON public.messages(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_conversations_users ON public.conversations(user1_id, user2_id);
+-- EVENTS POLICIES
+CREATE POLICY "View published events or organizer drafts" ON public.events
+  FOR SELECT TO authenticated
+  USING (
+    is_published = true OR
+    EXISTS (
+      SELECT 1 FROM public.club_memberships cm
+      WHERE cm.club_id = events.club_id AND cm.user_id = auth.uid() AND cm.role IN ('president', 'organizer') AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
--- 10. Notifications table
-CREATE TABLE IF NOT EXISTS public.notifications (
-  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  actor_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  type TEXT NOT NULL,
-  post_id UUID REFERENCES public.posts(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  read BOOLEAN NOT NULL DEFAULT false
-);
+CREATE POLICY "Organizers create events" ON public.events
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.club_memberships cm
+      WHERE cm.club_id = events.club_id AND cm.user_id = auth.uid() AND cm.role IN ('president', 'organizer') AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
-ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Organizers update events" ON public.events
+  FOR UPDATE TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.club_memberships cm
+      WHERE cm.club_id = events.club_id AND cm.user_id = auth.uid() AND cm.role IN ('president', 'organizer') AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Users can view own notifications') THEN
-    CREATE POLICY "Users can view own notifications"
-      ON public.notifications FOR SELECT
-      USING (auth.uid() = user_id);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Auth users can create notifications') THEN
-    CREATE POLICY "Auth users can create notifications"
-      ON public.notifications FOR INSERT
-      WITH CHECK (auth.uid() = actor_id);
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Users can update own notifications') THEN
-    CREATE POLICY "Users can update own notifications"
-      ON public.notifications FOR UPDATE
-      USING (auth.uid() = user_id);
-  END IF;
-END $$;
+-- EVENT REGISTRATIONS POLICIES (Strict Privacy)
+CREATE POLICY "Attendee or organizer views registration" ON public.event_registrations
+  FOR SELECT TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (
+      SELECT 1 FROM public.events ev
+      JOIN public.club_memberships cm ON ev.club_id = cm.club_id
+      WHERE ev.id = event_registrations.event_id
+        AND cm.user_id = auth.uid()
+        AND cm.role IN ('president', 'organizer')
+        AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
-CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id, created_at DESC);
+CREATE POLICY "User inserts own registration" ON public.event_registrations
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+  );
 
--- Automatic notification triggers for likes, comments, and follows
-CREATE OR REPLACE FUNCTION public.handle_new_like_notification()
-RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_post_author UUID;
-BEGIN
-  SELECT user_id INTO v_post_author FROM public.posts WHERE id = NEW.post_id;
-  IF v_post_author IS NOT NULL AND v_post_author != NEW.user_id THEN
-    INSERT INTO public.notifications (user_id, actor_id, type, post_id)
-    VALUES (v_post_author, NEW.user_id, 'like', NEW.post_id);
-  END IF;
-  RETURN NEW;
-END;
-$$;
+CREATE POLICY "User or organizer updates registration" ON public.event_registrations
+  FOR UPDATE TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (
+      SELECT 1 FROM public.events ev
+      JOIN public.club_memberships cm ON ev.club_id = cm.club_id
+      WHERE ev.id = event_registrations.event_id
+        AND cm.user_id = auth.uid()
+        AND cm.role IN ('president', 'organizer')
+        AND cm.status = 'active'
+    ) OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
-DROP TRIGGER IF EXISTS on_like_created ON public.likes;
-CREATE TRIGGER on_like_created
-  AFTER INSERT ON public.likes
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_like_notification();
+CREATE POLICY "User cancels own registration" ON public.event_registrations
+  FOR DELETE TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND college_role = 'college_admin')
+  );
 
-CREATE OR REPLACE FUNCTION public.handle_new_comment_notification()
-RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_post_author UUID;
-BEGIN
-  SELECT user_id INTO v_post_author FROM public.posts WHERE id = NEW.post_id;
-  IF v_post_author IS NOT NULL AND v_post_author != NEW.user_id THEN
-    INSERT INTO public.notifications (user_id, actor_id, type, post_id)
-    VALUES (v_post_author, NEW.user_id, 'comment', NEW.post_id);
-  END IF;
-  RETURN NEW;
-END;
-$$;
+-- NOTIFICATIONS POLICIES
+CREATE POLICY "Users view own notifications" ON public.notifications
+  FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);
 
-DROP TRIGGER IF EXISTS on_comment_created ON public.comments;
-CREATE TRIGGER on_comment_created
-  AFTER INSERT ON public.comments
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_comment_notification();
+CREATE POLICY "Users update own notifications" ON public.notifications
+  FOR UPDATE TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
-CREATE OR REPLACE FUNCTION public.handle_new_follower_notification()
-RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
-BEGIN
-  IF NEW.following_id != NEW.follower_id THEN
-    INSERT INTO public.notifications (user_id, actor_id, type)
-    VALUES (NEW.following_id, NEW.follower_id, 'follow');
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS on_follower_created ON public.followers;
-CREATE TRIGGER on_follower_created
-  AFTER INSERT ON public.followers
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_follower_notification();
-
--- 11. Enable realtime
-DO $$ BEGIN
-  BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE public.posts;
-  EXCEPTION WHEN duplicate_object THEN NULL;
-  END;
-  BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE public.likes;
-  EXCEPTION WHEN duplicate_object THEN NULL;
-  END;
-  BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE public.comments;
-  EXCEPTION WHEN duplicate_object THEN NULL;
-  END;
-  BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
-  EXCEPTION WHEN duplicate_object THEN NULL;
-  END;
-  BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
-  EXCEPTION WHEN duplicate_object THEN NULL;
-  END;
-END $$;
+CREATE POLICY "Authorized system inserts notifications" ON public.notifications
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
