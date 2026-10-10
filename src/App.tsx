@@ -15,6 +15,7 @@ import Notifications from "./pages/Notifications";
 import Chats from "./pages/Chats";
 import ChatConversation from "./pages/ChatConversation";
 import NotFound from "./pages/NotFound";
+import ReleaseUpdateDialog from "@/components/ReleaseUpdateDialog";
 
 const queryClient = new QueryClient();
 
@@ -43,6 +44,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <ReleaseUpdateDialog />
           <Routes>
             <Route path="/auth" element={<AuthRoute><Auth /></AuthRoute>} />
             <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
